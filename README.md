@@ -4,13 +4,17 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/minpeter-labs/global-egress.svg)](https://pkg.go.dev/github.com/minpeter-labs/global-egress)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Give it a WireGuard configuration bundle, get a rotating egress proxy.
+Turn a **Mullvad** subscription into an internal rotating egress proxy: one
+endpoint, hundreds of exit addresses.
 
-`global-egress` reads a provider bundle such as Mullvad's "all servers" zip and
-exposes hundreds of exit addresses behind one internal proxy endpoint. Clients
-pick a country, pin a sticky session, demand a unique IP per request, or report a
-blocked IP and get rotated — all through the proxy username or a small control
-API.
+Point it at Mullvad's "all servers" WireGuard zip and it exposes every relay's exit
+address behind a single internal proxy. Clients pick a country, pin a sticky
+session, demand a unique IP per request, or report a blocked IP and get rotated —
+all through the proxy username or a small control API.
+
+It also has a provider-neutral mode that needs nothing but WireGuard configs, at a
+much higher cost per exit address. Which is which is spelled out under
+[Provider support](#provider-support).
 
 ```text
 internal client
@@ -29,11 +33,36 @@ global-egress ── slot selection (country / session / unique / cooldown)
 Everything runs in one process. No `wg-quick`, no network namespaces, no
 `/dev/net/tun`, no changes to host routing, no root required.
 
+## Provider support
+
+Being honest about the coupling, because the default mode is not generic:
+
+| | `relay-socks` (default) | `wireguard` |
+|---|---|---|
+| Works with | **Mullvad only** | any WireGuard provider |
+| Needs | a SOCKS5 proxy on every relay, reachable inside the tunnel, plus Mullvad's relay list API | nothing but the config bundle |
+| Exit addresses | one per relay (~530) | one per tunnel |
+
+The Mullvad-specific parts are confined to one package, `internal/mullvad`: the
+relay list endpoint, its JSON schema, and the fact that each relay answers SOCKS5
+on port 1080 from inside a tunnel. Everything else — tunnels, slot selection,
+sessions, unique-IP batches, cooldowns, both proxy protocols — is provider
+agnostic and works from any wg-quick style config.
+
+Supporting a second provider means writing a sibling of `internal/mullvad` that
+produces `pool.ExitSpec` values; the pool itself imports no provider package. If
+your provider has no relay proxies, `mode: wireguard` already works today.
+
+Two smaller conventions lean on Mullvad and degrade gracefully elsewhere: country
+and city labels are parsed from file names like `us-lax-wg-001.conf`, and the
+default public-IP check calls `am.i.mullvad.net`. Unparsed names simply leave
+`cc=`/`city=` filters with nothing to match, and the check URL is configurable.
+
 ## Two modes, and why the default is what it is
 
 | | `relay-socks` (default) | `wireguard` |
 |---|---|---|
-| A slot is | a relay's SOCKS proxy, reached through an entry tunnel | its own userspace WireGuard tunnel |
+| A slot is | a Mullvad relay's SOCKS proxy, reached through an entry tunnel | its own userspace WireGuard tunnel |
 | Exit addresses | ~530, one per relay | one per tunnel |
 | Cost of rotating | one TCP connection | one WireGuard handshake |
 | Key associations | 2-3 total, long-lived | one per slot |
@@ -257,8 +286,8 @@ documented there.
 
 - Go 1.25 or newer (the floor comes from `golang.org/x/net` and `golang.org/x/crypto`)
 - Linux for deployment; the code also compiles for darwin/arm64
-- A WireGuard configuration bundle from a provider whose relays expose SOCKS
-  proxies, for `relay-socks` mode
+- A Mullvad account and its WireGuard configuration bundle, for the default
+  `relay-socks` mode. Any WireGuard bundle works in `wireguard` mode.
 
 ## Development
 

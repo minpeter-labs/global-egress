@@ -12,22 +12,21 @@ import (
 
 	"github.com/minpeter-labs/global-egress/internal/catalog"
 	"github.com/minpeter-labs/global-egress/internal/policy"
-	"github.com/minpeter-labs/global-egress/internal/relaylist"
 )
 
-func testRelays() []relaylist.Relay {
-	return []relaylist.Relay{
+func testExits() []ExitSpec {
+	return []ExitSpec{
 		{
-			Hostname: "jp-tyo-wg-001", Country: "jp", CityCode: "tyo", Active: true,
-			SocksName: "jp-tyo-wg-socks5-001.relays.example", SocksPort: 1080,
+			ID: "jp-tyo-wg-socks5-001", Country: "jp", City: "jp-tyo",
+			SocksAddr: "jp-tyo-wg-socks5-001.relays.example:1080",
 		},
 		{
-			Hostname: "de-fra-wg-001", Country: "de", CityCode: "fra", Active: true,
-			SocksName: "de-fra-wg-socks5-001.relays.example", SocksPort: 1080,
+			ID: "de-fra-wg-socks5-001", Country: "de", City: "de-fra",
+			SocksAddr: "de-fra-wg-socks5-001.relays.example:1080",
 		},
 		{
-			Hostname: "us-lax-wg-001", Country: "us", CityCode: "lax", Active: true,
-			SocksName: "us-lax-wg-socks5-001.relays.example", SocksPort: 1080,
+			ID: "us-lax-wg-socks5-001", Country: "us", City: "us-lax",
+			SocksAddr: "us-lax-wg-socks5-001.relays.example:1080",
 		},
 	}
 }
@@ -63,7 +62,7 @@ func newRelayPool(t *testing.T, opts Options) *Pool {
 	}
 	// Pin selection to the best entry so ordering assertions are deterministic.
 	opts.DisableEntryExploration = true
-	p, err := NewWithSpecs(SpecsFromRelays(testRelays()), testEntrySlots(), opts)
+	p, err := NewWithSpecs(SpecsFromExits(testExits()), testEntrySlots(), opts)
 	if err != nil {
 		t.Fatalf("NewWithSpecs: %v", err)
 	}
@@ -71,8 +70,8 @@ func newRelayPool(t *testing.T, opts Options) *Pool {
 	return p
 }
 
-func TestSpecsFromRelays(t *testing.T) {
-	specs := SpecsFromRelays(testRelays())
+func TestSpecsFromExits(t *testing.T) {
+	specs := SpecsFromExits(testExits())
 	if len(specs) != 3 {
 		t.Fatalf("len(specs) = %d, want 3", len(specs))
 	}
@@ -84,10 +83,10 @@ func TestSpecsFromRelays(t *testing.T) {
 			t.Errorf("%s has no proxy address", spec.ID)
 		}
 	}
-	// IDs come from the SOCKS name, not the WireGuard hostname, so a relay's
+	// IDs come from the provider's proxy name, not the WireGuard hostname, so a
 	// proxy slot can never collide with a WireGuard slot for the same relay.
 	if specs[0].ID != "jp-tyo-wg-socks5-001" {
-		t.Errorf("specs[0].ID = %q, want it derived from the SOCKS name", specs[0].ID)
+		t.Errorf("specs[0].ID = %q", specs[0].ID)
 	}
 	if specs[0].City != "jp-tyo" {
 		t.Errorf("specs[0].City = %q, want jp-tyo", specs[0].City)
@@ -95,7 +94,7 @@ func TestSpecsFromRelays(t *testing.T) {
 }
 
 func TestRelaySlotsRequireAnEntry(t *testing.T) {
-	_, err := NewWithSpecs(SpecsFromRelays(testRelays()), nil, Options{
+	_, err := NewWithSpecs(SpecsFromExits(testExits()), nil, Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err == nil {
@@ -113,7 +112,7 @@ func TestWireGuardSlotsNeedNoEntry(t *testing.T) {
 }
 
 func TestNewWithSpecsRejectsDuplicates(t *testing.T) {
-	specs := SpecsFromRelays(testRelays())
+	specs := SpecsFromExits(testExits())
 	specs = append(specs, specs[0])
 	if _, err := NewWithSpecs(specs, testEntrySlots(), Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

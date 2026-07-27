@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/relaylist"
 )
 
 // Dialer is anything that can open a TCP connection, which is all the pool needs
@@ -84,18 +83,34 @@ func SpecsFromBundle(bundle *catalog.Bundle) []Spec {
 	return specs
 }
 
-// SpecsFromRelays turns a provider relay list into one slot per relay SOCKS
-// proxy. These slots share the entry tunnels, so hundreds of them cost almost
-// nothing.
-func SpecsFromRelays(relays []relaylist.Relay) []Spec {
-	specs := make([]Spec, 0, len(relays))
-	for _, relay := range relays {
+// ExitSpec is everything the pool needs to know about one proxy exit, expressed
+// without reference to any particular provider.
+//
+// Keeping this type here rather than accepting a provider's own struct is what
+// stops the pool from depending on a provider package: whoever knows how to talk
+// to a provider does the translation.
+type ExitSpec struct {
+	// ID must be unique within the pool.
+	ID string
+	// Country is an ISO-3166-1 alpha-2 code. May be empty.
+	Country string
+	// City is a "<country>-<city>" label. May be empty.
+	City string
+	// SocksAddr is the proxy "host:port", resolvable through an entry tunnel.
+	SocksAddr string
+}
+
+// SpecsFromExits turns proxy exits into slots. These slots share the entry
+// tunnels, so hundreds of them cost almost nothing.
+func SpecsFromExits(exits []ExitSpec) []Spec {
+	specs := make([]Spec, 0, len(exits))
+	for _, exit := range exits {
 		specs = append(specs, Spec{
-			ID:        relay.SlotID(),
-			Country:   relay.Country,
-			City:      relay.City(),
+			ID:        exit.ID,
+			Country:   exit.Country,
+			City:      exit.City,
 			Kind:      KindRelaySocks,
-			SocksAddr: relay.SocksAddr(),
+			SocksAddr: exit.SocksAddr,
 		})
 	}
 	return specs

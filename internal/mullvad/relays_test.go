@@ -1,4 +1,4 @@
-package relaylist
+package mullvad
 
 import (
 	"context"

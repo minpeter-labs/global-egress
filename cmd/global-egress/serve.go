@@ -15,10 +15,10 @@ import (
 	"github.com/minpeter-labs/global-egress/internal/catalog"
 	"github.com/minpeter-labs/global-egress/internal/config"
 	"github.com/minpeter-labs/global-egress/internal/control"
+	"github.com/minpeter-labs/global-egress/internal/mullvad"
 	"github.com/minpeter-labs/global-egress/internal/netguard"
 	"github.com/minpeter-labs/global-egress/internal/pool"
 	"github.com/minpeter-labs/global-egress/internal/proxy"
-	"github.com/minpeter-labs/global-egress/internal/relaylist"
 )
 
 func runServe(ctx context.Context, args []string) error {
@@ -259,7 +259,7 @@ func buildSlots(ctx context.Context, cfg config.Config, bundle *catalog.Bundle, 
 	}
 
 	cachePath := cfg.RelayCachePath()
-	list, fetched, err := relaylist.LoadOrFetch(ctx, cfg.Relays.URL, cachePath, cfg.Relays.Refresh)
+	list, fetched, err := mullvad.LoadOrFetch(ctx, cfg.Relays.URL, cachePath, cfg.Relays.Refresh)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relay list: %w", err)
 	}
@@ -284,5 +284,20 @@ func buildSlots(ctx context.Context, cfg config.Config, bundle *catalog.Bundle, 
 		slog.Bool("relay_list_refreshed", fetched),
 		slog.String("entries", strings.Join(entryNames, ",")))
 
-	return pool.SpecsFromRelays(relays), entrySlots, nil
+	return pool.SpecsFromExits(exitsFromRelays(relays)), entrySlots, nil
+}
+
+// exitsFromRelays is the seam between the provider and the pool: it is the only
+// place that turns Mullvad's relay description into the pool's neutral one.
+func exitsFromRelays(relays []mullvad.Relay) []pool.ExitSpec {
+	exits := make([]pool.ExitSpec, 0, len(relays))
+	for _, relay := range relays {
+		exits = append(exits, pool.ExitSpec{
+			ID:        relay.SlotID(),
+			Country:   relay.Country,
+			City:      relay.City(),
+			SocksAddr: relay.SocksAddr(),
+		})
+	}
+	return exits
 }

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/relaylist"
+	"github.com/minpeter-labs/global-egress/internal/mullvad"
 )
 
 // runRelays inspects (and optionally refreshes) the provider relay list, which is
 // where relay-socks mode gets its exit addresses.
 func runRelays(ctx context.Context, args []string) error {
 	fs := newFlagSet("relays")
-	url := fs.String("url", relaylist.DefaultURL, "relay list endpoint")
+	url := fs.String("url", mullvad.DefaultURL, "relay list endpoint")
 	cache := fs.String("cache", "", "cache file to read and update")
 	refresh := fs.Bool("refresh", false, "always fetch, ignoring the cache")
 	country := fs.String("country", "", "only list this country code")
@@ -28,7 +28,7 @@ func runRelays(ctx context.Context, args []string) error {
 	if *refresh {
 		maxAge = 0
 	}
-	list, fetched, err := relaylist.LoadOrFetch(ctx, *url, *cache, maxAge)
+	list, fetched, err := mullvad.LoadOrFetch(ctx, *url, *cache, maxAge)
 	if err != nil {
 		return err
 	}

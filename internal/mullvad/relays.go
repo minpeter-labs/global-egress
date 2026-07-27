@@ -1,12 +1,21 @@
-// Package relaylist reads the provider's list of relays and the SOCKS proxy each
-// one exposes.
+// Package mullvad talks to Mullvad: it reads their relay list and the SOCKS proxy
+// each relay exposes.
 //
-// This is the second, cheaper source of exit addresses. A WireGuard bundle gives
-// one exit IP per tunnel, and every tunnel costs a key association that providers
-// rate-limit. The relay list instead describes a SOCKS proxy on every relay,
-// reachable from inside any tunnel, so a single tunnel can exit from hundreds of
-// addresses without opening anything new.
-package relaylist
+// This is the one provider-specific package, and it is where the project's
+// Mullvad dependency lives. Two things here are Mullvad's, not WireGuard's:
+//
+//   - the relay list schema and endpoint (hostname, country_code, socks_name, ...)
+//   - a SOCKS5 proxy on every relay, reachable only from inside a Mullvad tunnel
+//
+// That proxy is what makes cheap rotation possible. A WireGuard bundle gives one
+// exit address per tunnel, and every tunnel costs a key association that Mullvad
+// rate-limits; the relay proxies give hundreds of exit addresses from a single
+// tunnel, at the cost of a TCP connection each.
+//
+// Supporting another provider means writing a sibling of this package that yields
+// the same handful of fields. Nothing outside it imports Mullvad-specific types:
+// the pool works with pool.ExitSpec, which cmd builds from what this returns.
+package mullvad
 
 import (
 	"context"
@@ -152,15 +161,15 @@ func Fetch(ctx context.Context, url string) (*List, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("relaylist: fetch %s: %w", url, err)
+		return nil, fmt.Errorf("mullvad: fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("relaylist: fetch %s: unexpected status %s", url, resp.Status)
+		return nil, fmt.Errorf("mullvad: fetch %s: unexpected status %s", url, resp.Status)
 	}
 	blob, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, fmt.Errorf("relaylist: read %s: %w", url, err)
+		return nil, fmt.Errorf("mullvad: read %s: %w", url, err)
 	}
 	return parse(blob)
 }
@@ -168,10 +177,10 @@ func Fetch(ctx context.Context, url string) (*List, error) {
 func parse(blob []byte) (*List, error) {
 	var relays []Relay
 	if err := json.Unmarshal(blob, &relays); err != nil {
-		return nil, fmt.Errorf("relaylist: parse: %w", err)
+		return nil, fmt.Errorf("mullvad: parse: %w", err)
 	}
 	if len(relays) == 0 {
-		return nil, fmt.Errorf("relaylist: list is empty")
+		return nil, fmt.Errorf("mullvad: list is empty")
 	}
 	return &List{Relays: relays, FetchedAt: time.Now()}, nil
 }
@@ -179,7 +188,7 @@ func parse(blob []byte) (*List, error) {
 // Save writes the list to path so a restart does not need the network.
 func (l *List) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("relaylist: create cache dir: %w", err)
+		return fmt.Errorf("mullvad: create cache dir: %w", err)
 	}
 	blob, err := json.MarshalIndent(l.Relays, "", "  ")
 	if err != nil {
@@ -187,10 +196,10 @@ func (l *List) Save(path string) error {
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, blob, 0o644); err != nil {
-		return fmt.Errorf("relaylist: write cache: %w", err)
+		return fmt.Errorf("mullvad: write cache: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("relaylist: replace cache: %w", err)
+		return fmt.Errorf("mullvad: replace cache: %w", err)
 	}
 	return nil
 }
@@ -199,7 +208,7 @@ func (l *List) Save(path string) error {
 func LoadFile(path string) (*List, error) {
 	blob, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("relaylist: read %s: %w", path, err)
+		return nil, fmt.Errorf("mullvad: read %s: %w", path, err)
 	}
 	list, err := parse(blob)
 	if err != nil {

@@ -6,7 +6,9 @@ Measured on 2026-07-28 with a 532-slot Mullvad bundle, Go 1.26, Linux, one
 ## relay-socks mode, measured
 
 The default mode keeps a few entry tunnels up and exits through the SOCKS proxy on
-each relay.
+each Mullvad relay. Every number below is specific to Mullvad's network and to a
+measuring host in Korea that was itself behind a tunnel, so treat them as shape
+rather than as absolute values.
 
 ```text
 exits available            532   (relays that are active and expose a proxy)

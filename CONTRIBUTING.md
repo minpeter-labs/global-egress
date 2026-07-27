@@ -70,6 +70,16 @@ lists the real set.
 snapshots have a `pkg/tcpip/stack` directory declaring two different packages, so
 the build fails outright; there is a comment in `go.mod` saying so.
 
+## Where the provider coupling lives
+
+`internal/mullvad` is the only package that knows about a specific VPN provider:
+its relay list endpoint, that list's JSON schema, and the SOCKS proxy each relay
+exposes. `cmd/global-egress` translates what it returns into `pool.ExitSpec`, and
+the pool imports no provider package at all.
+
+Keep it that way. A second provider should be a sibling package producing the same
+`pool.ExitSpec` values, not a set of conditionals threaded through the pool.
+
 ## Things to be careful about
 
 **Never commit a bundle, a `.conf`, or a key.** `.gitignore` covers `*.zip`,
