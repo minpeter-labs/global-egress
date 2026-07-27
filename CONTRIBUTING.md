@@ -18,9 +18,21 @@ of gofmt, so gofmt-clean is implied, and goimports keeps imports in three groups
 standard library, external, then this module. Using the one binary for both local
 runs and CI means the two cannot drift apart.
 
-CI runs three jobs in parallel: `lint` (golangci-lint plus the formatting diff),
-`test` (build, tests, tests under the race detector) and `vulncheck`
-(`govulncheck`).
+CI runs these jobs in parallel:
+
+| job | what it checks |
+|---|---|
+| `lint` | golangci-lint, plus `golangci-lint fmt --diff` |
+| `modules` | `go mod tidy` leaves no diff, `go mod verify` passes |
+| `test` | build, tests and race tests on Go 1.25.x **and** stable |
+| `cross-build` | linux/amd64, linux/arm64, darwin/arm64 compile |
+| `vulncheck` | `govulncheck` |
+
+## Supported Go versions
+
+The floor is **Go 1.25**, and it is not ours to choose: `golang.org/x/net` and
+`golang.org/x/crypto` both require it, so Go 1.24 cannot resolve the module graph at
+all. CI proves both ends of the range by running the suite on 1.25.x and on stable.
 
 There are no external services in the unit tests: WireGuard and SOCKS behaviour is
 exercised against in-process fakes, and anything that would dial a provider is

@@ -249,6 +249,13 @@ your provider's terms for how many simultaneous connections one device may make.
 See [`deploy/config.example.yaml`](deploy/config.example.yaml). Every field is
 documented there.
 
+## Requirements
+
+- Go 1.25 or newer (the floor comes from `golang.org/x/net` and `golang.org/x/crypto`)
+- Linux for deployment; the code also compiles for darwin/arm64
+- A WireGuard configuration bundle from a provider whose relays expose SOCKS
+  proxies, for `relay-socks` mode
+
 ## Development
 
 ```sh

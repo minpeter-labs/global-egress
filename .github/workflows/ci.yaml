@@ -38,9 +38,11 @@ jobs:
       - name: formatting (gofumpt + goimports)
         run: golangci-lint fmt --diff ./...
 
-  test:
+  # Module bookkeeping is easy to forget in a pull request and annoying to discover
+  # later, so it gets its own fast job.
+  modules:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -48,6 +50,40 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "go mod tidy produced changes; commit them:"
+            git --no-pager diff -- go.mod go.sum
+            exit 1
+          fi
+
+      - name: dependencies match their checksums
+        run: go mod verify
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported toolchain is the floor declared in go.mod, which is
+        # itself set by what golang.org/x/net and x/crypto require. "stable" catches
+        # regressions from new releases before they reach users.
+        go: ["1.25.x", "stable"]
+    name: test (go ${{ matrix.go }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: go version in use
+        run: go version
 
       - name: build
         run: go build ./...
@@ -59,6 +95,39 @@ jobs:
       # them, so the race detector earns its keep here.
       - name: test with race detector
         run: go test -race ./...
+
+  # The release workflow cross-compiles; verify those targets on every change
+  # rather than discovering a broken build on tag day.
+  cross-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          # Not a deployment target, but contributors develop on macOS and the
+          # userspace tunnel stack is portable, so keep it compiling.
+          - goos: darwin
+            goarch: arm64
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build ./...
 
   vulncheck:
     runs-on: ubuntu-latest
