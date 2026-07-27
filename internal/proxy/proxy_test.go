@@ -244,10 +244,20 @@ func TestEgressHeadersReportTheAppliedPolicy(t *testing.T) {
 		t.Errorf("X-Egress-Policy = %q", got)
 	}
 
-	// And the empty case has to be visible too, not absent.
+	// The two ways of ending up unconstrained must not look alike in the header:
+	// one is a deliberate choice, the other is a policy that never arrived.
 	headers = egressHeaders(lease, policy.Policy{})
-	if got := headers["X-Egress-Policy"]; got != "(any)" {
-		t.Errorf("X-Egress-Policy for an empty policy = %q, want (any)", got)
+	if got := headers["X-Egress-Policy"]; got != "(none)" {
+		t.Errorf("X-Egress-Policy for an empty policy = %q, want (none)", got)
+	}
+
+	deliberate, err := policy.Parse("any=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers = egressHeaders(lease, deliberate)
+	if got := headers["X-Egress-Policy"]; got != "any=1" {
+		t.Errorf("X-Egress-Policy for any=1 = %q, want any=1", got)
 	}
 }
 
@@ -309,5 +319,26 @@ func TestSOCKS5RejectsWhenPolicyRequired(t *testing.T) {
 	}
 	if status := negotiate("cc=jp"); status != 0x00 {
 		t.Errorf("a request carrying cc=jp was rejected with status 0x%02x", status)
+	}
+}
+
+func TestRequirePolicyAcceptsExplicitAny(t *testing.T) {
+	// require_policy exists to catch clients that dropped their directives, not to
+	// forbid callers who genuinely want any exit. any=1 is how they say so.
+	deps := &Deps{RequirePolicy: true}
+
+	pol, err := deps.authorize("any=1", "x", true)
+	if err != nil {
+		t.Fatalf("any=1 was rejected: %v", err)
+	}
+	if !pol.AnyExit {
+		t.Error("AnyExit not set")
+	}
+	if len(pol.Countries) != 0 {
+		t.Error("any=1 must not constrain anything")
+	}
+
+	if _, err := deps.authorize("", "", false); !errors.Is(err, errPolicyRequired) {
+		t.Errorf("silence should still be rejected, got %v", err)
 	}
 }

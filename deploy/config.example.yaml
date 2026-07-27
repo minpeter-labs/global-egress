@@ -57,7 +57,8 @@ access:
   # Reject requests that carry no selection directives. The policy rides in the
   # proxy username, and several clients drop the credentials when the password is
   # empty, which turns "give me a Japanese exit" into "give me any exit" with no
-  # error. Turn this on where that would be a bug.
+  # error. Turn this on where that would be a bug; callers that genuinely want any
+  # exit can still say so with the any=1 directive.
   require_policy: false
   # Optional bearer token for the control API.
   control_token: ""
