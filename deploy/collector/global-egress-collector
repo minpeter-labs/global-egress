@@ -5,7 +5,10 @@
 # node_exporter textfile collector directory. Only GETs against the control API,
 # so it can never change pool state.
 set -u
-CONTROL="${CONTROL:-http://10.0.0.30:8080}"
+# Set CONTROL in the environment (OpenRC: /etc/conf.d/global-egress-metrics). The
+# control API binds to the service's own address, not loopback, so there is no
+# useful default beyond documenting the shape.
+CONTROL="${CONTROL:-http://127.0.0.1:8080}"
 OUT_DIR=/var/lib/node_exporter/textfile_collector
 OUT="$OUT_DIR/global_egress.prom"
 INTERVAL="${INTERVAL:-60}"

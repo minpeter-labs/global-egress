@@ -38,6 +38,16 @@ global-egress-collector  (60 s loop, read-only GETs against the control API)
 node_exporter --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
 ```
 
+Point it at the control API through the environment, not by editing the script —
+otherwise every deployment carries a private diff:
+
+```sh
+install -m 0755 deploy/collector/global-egress-collector /usr/local/bin/
+install -m 0755 deploy/collector/global-egress-metrics.openrc /etc/init.d/global-egress-metrics
+install -m 0644 deploy/collector/global-egress-metrics.confd /etc/conf.d/global-egress-metrics
+# then edit CONTROL in /etc/conf.d/global-egress-metrics
+```
+
 Series it produces:
 
 | Series | Meaning |
