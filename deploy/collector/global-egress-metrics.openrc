@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+name="global-egress metrics"
+description="Write global-egress metrics into the node_exporter textfile collector"
+
+command="/usr/local/bin/global-egress-collector"
+command_background="yes"
+pidfile="/run/global-egress-collector.pid"
+output_log="/var/log/global-egress-collector.log"
+error_log="/var/log/global-egress-collector.log"
+
+depend() {
+    need net
+    after global-egress
+}
+
+start_pre() {
+    checkpath --file --mode 0644 "$output_log"
+    mkdir -p /var/lib/node_exporter/textfile_collector && chmod 755 /var/lib/node_exporter/textfile_collector
+}

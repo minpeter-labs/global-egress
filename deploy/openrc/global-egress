@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+name="global-egress"
+description="Internal rotating egress proxy (Mullvad relay SOCKS over userspace WireGuard)"
+
+command="/usr/local/bin/global-egress"
+command_args="serve -config /opt/global-egress/config.yaml"
+# Tunnels run in userspace, so the service needs no privileges at all.
+command_user="egress:egress"
+command_background="yes"
+pidfile="/run/global-egress.pid"
+output_log="/var/log/global-egress.log"
+error_log="/var/log/global-egress.log"
+
+depend() {
+    need net
+    use dns
+}
+
+start_pre() {
+    checkpath --file --mode 0644 --owner egress:egress "$output_log"
+    checkpath --directory --mode 0700 --owner egress:egress /var/lib/global-egress
+}

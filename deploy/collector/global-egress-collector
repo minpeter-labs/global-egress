@@ -1,0 +1,62 @@
+#!/bin/sh
+# global-egress metrics collector.
+#
+# Follows the fleet convention: read-only inspection, atomic write into the
+# node_exporter textfile collector directory. Only GETs against the control API,
+# so it can never change pool state.
+set -u
+CONTROL="${CONTROL:-http://10.0.0.30:8080}"
+OUT_DIR=/var/lib/node_exporter/textfile_collector
+OUT="$OUT_DIR/global_egress.prom"
+INTERVAL="${INTERVAL:-60}"
+
+mkdir -p "$OUT_DIR"
+chmod 755 "$OUT_DIR"
+
+emit() {
+  tmp="$OUT.$$"
+  {
+    stats=$(curl -sS --max-time 8 "$CONTROL/v1/stats" 2>/dev/null)
+    echo '# HELP global_egress_up Control API reachable.'
+    echo '# TYPE global_egress_up gauge'
+    if [ -z "$stats" ]; then
+      echo 'global_egress_up 0'
+      return 0
+    fi
+    echo 'global_egress_up 1'
+
+    # One gauge per numeric field of /v1/stats, named after the field.
+    echo "$stats" | sed -n 's/^[[:space:]]*"\([a-z_]*\)": \([0-9][0-9]*\),\{0,1\}$/\1 \2/p' |
+      while read -r key value; do
+        echo "# TYPE global_egress_$key gauge"
+        echo "global_egress_$key $value"
+      done
+
+    # Entry identity and health. The control API pretty-prints, so walk the fields
+    # in order and emit once the object is complete: id and region always precede
+    # open in the response.
+    echo '# HELP global_egress_entry_open Entry tunnel is established.'
+    echo '# TYPE global_egress_entry_open gauge'
+    curl -sS --max-time 8 "$CONTROL/v1/entries" 2>/dev/null | awk '
+      /"id":/     { id = $0; sub(/.*"id": *"/, "", id); sub(/".*/, "", id) }
+      /"region":/ { region = $0; sub(/.*"region": *"/, "", region); sub(/".*/, "", region) }
+      /"open":/   {
+        open = ($0 ~ /true/) ? 1 : 0
+        if (id != "") {
+          printf "global_egress_entry_open{entry=\"%s\",region=\"%s\"} %d\n", id, region, open
+        }
+        id = ""; region = ""
+      }'
+  } > "$tmp" 2>/dev/null
+  chmod 0644 "$tmp"
+  mv "$tmp" "$OUT"
+}
+
+if [ "${1:-}" = "once" ]; then
+  emit
+  exit 0
+fi
+while :; do
+  emit
+  sleep "$INTERVAL"
+done

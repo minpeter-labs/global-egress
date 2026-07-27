@@ -315,7 +315,32 @@ make check   # formatting (gofumpt + goimports), vet, lint, tests
 make run     # run with config.local.yaml
 ```
 
+## Monitoring
+
+The service speaks JSON, so a small collector translates `/v1/stats` and
+`/v1/entries` into Prometheus text and node_exporter serves it.
+
+```sh
+install -m 0755 deploy/collector/global-egress-collector /usr/local/bin/
+install -m 0644 deploy/grafana/global-egress.json \
+  /opt/monitoring/grafana/dashboards/global-egress.json
+```
+
+The shipped dashboard (**UID `global-egress`**, 12 panels) covers entry tunnel state,
+request and failure rates, exit inventory coverage, sticky sessions and unique
+batches, guest CPU/memory/throughput, and collector-versus-scrape freshness. Its
+datasource and scrape job are dashboard variables rather than baked-in values, so it
+works on any Grafana. Details and the metric list:
+[`deploy/grafana/README.md`](deploy/grafana/README.md).
+
+The one panel to watch over time is guest memory: userspace tunnels cost about
+1.6 MiB each, so it should stay flat once the entries are up.
+
 ## Deployment
+
+Systemd hosts use [`deploy/global-egress.service`](deploy/global-egress.service);
+Alpine/OpenRC guests use [`deploy/openrc/global-egress`](deploy/openrc/global-egress)
+and [`deploy/collector/global-egress-metrics.openrc`](deploy/collector/global-egress-metrics.openrc).
 
 ```sh
 # Create the unprivileged account the unit runs as.

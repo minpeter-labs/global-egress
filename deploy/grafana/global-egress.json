@@ -1,0 +1,856 @@
+{
+  "uid": "global-egress",
+  "title": "Global Egress Proxy",
+  "tags": [
+    "homelab",
+    "egress",
+    "proxy",
+    "mullvad"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
+        "name": "job",
+        "label": "Scrape job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(global_egress_up, job)",
+        "current": {
+          "selected": false,
+          "text": "global-egress",
+          "value": "global-egress"
+        },
+        "definition": "label_values(global_egress_up, job)",
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "refresh": 1,
+        "skipUrlSync": false,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Service",
+      "description": "1 when the control API answers. Everything else on this dashboard comes from it, so a 0 here explains any other gap.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_up{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "up"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Entries open",
+      "description": "WireGuard entry tunnels currently established. Every request travels through one of these; all three down means a total outage.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_entries_open{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "open"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_entries{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "configured"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Unique exit IPs known",
+      "description": "Distinct public addresses measured so far. The catalogue holds ~530 exits; this grows as they are used, and is what uniq= batches are enforced against.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_unique_public_ips{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "unique IPs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_slots{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "exits in catalogue"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active connections",
+      "description": "Leases in flight, against the pool-wide cap. Requests over the cap are refused with 503 and counted below.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 13,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_active_leases{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "active"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_max_concurrent_conns{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "cap"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Key associations used",
+      "description": "New WireGuard tunnels opened in the current rate window. This is the number the provider rate-limits; in relay-socks mode it should sit at the entry count and stay there.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_new_tunnels_used{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "used"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_new_tunnel_budget{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "budget"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Entry tunnel state",
+      "description": "Per-entry availability. A drop to 0 that recovers on its own is the pool detecting a dead entry, taking it out of rotation, and re-establishing it.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_entry_open{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "{{entry}} ({{region}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down"
+                },
+                "1": {
+                  "text": "up"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request rate and failures",
+      "description": "Acquisitions are slot selections, roughly one per new connection. Failures and busy refusals should stay near zero; sustained failures usually mean a dead entry rather than dead exits.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_acquisitions{job=\"$job\"}[5m]) * 60",
+          "refId": "A",
+          "legendFormat": "acquisitions/min"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_failures{job=\"$job\"}[5m]) * 60",
+          "refId": "B",
+          "legendFormat": "failures/min"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_refused_busy{job=\"$job\"}[5m]) * 60",
+          "refId": "C",
+          "legendFormat": "busy refusals/min"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_rotations{job=\"$job\"}[5m]) * 60",
+          "refId": "D",
+          "legendFormat": "rotations/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failures/min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "busy refusals/min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Exit inventory coverage",
+      "description": "How much of the catalogue has a measured exit address. Run `global-egress probe -mode relay-socks` to fill it in one pass instead of waiting for traffic.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_slots{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "exits in catalogue"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_slots_with_known_ip{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "measured"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_disabled_slots{job=\"$job\"}",
+          "refId": "C",
+          "legendFormat": "backed off"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Sessions and unique batches",
+      "description": "Sticky sessions pin one exit for a client; unique batches remember which addresses they have already used.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_sticky_sessions{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "sticky sessions"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_unique_batches{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "unique batches"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Guest CPU and memory (LXC 301)",
+      "description": "Userspace tunnels cost roughly 1.6 MiB each, so memory should stay flat once the entries are up. A slow climb over days is the thing to watch for.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 - (avg without(cpu, mode) (rate(node_cpu_seconds_total{job=\"$job\",mode=\"idle\"}[5m])) * 100)",
+          "refId": "A",
+          "legendFormat": "CPU %"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(node_memory_MemTotal_bytes{job=\"$job\"} - node_memory_MemAvailable_bytes{job=\"$job\"}) / 1024 / 1024",
+          "refId": "B",
+          "legendFormat": "memory used MiB"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CPU %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "memory used MiB"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "mbytes"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Guest network throughput",
+      "description": "All proxied traffic crosses eth0 twice, once from the client and once inside the tunnel, so expect roughly double the client-visible rate.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(node_network_receive_bytes_total{job=\"$job\",device=\"eth0\"}[5m]) * 8",
+          "refId": "A",
+          "legendFormat": "rx"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(node_network_transmit_bytes_total{job=\"$job\",device=\"eth0\"}[5m]) * 8",
+          "refId": "B",
+          "legendFormat": "tx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Collector and scrape freshness",
+      "description": "up is the Prometheus scrape; global_egress_up is the collector reaching the control API. The two disagreeing narrows the fault down immediately.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "up{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "node_exporter scrape"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_up{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "control API reachable"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "description": "Rotating egress proxy: entry tunnel health, request and failure rates, exit inventory coverage and guest resources. Ships with github.com/minpeter-labs/global-egress.",
+  "links": [
+    {
+      "title": "global-egress on GitHub",
+      "type": "link",
+      "url": "https://github.com/minpeter-labs/global-egress",
+      "icon": "external link",
+      "targetBlank": true,
+      "tooltip": "",
+      "tags": [],
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false
+    }
+  ]
+}
