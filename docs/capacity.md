@@ -79,15 +79,38 @@ afterwards *every* slot failed to handshake, including ones that had just worked
 and a repeat sweep from a second host with direct internet access returned
 0/532. Nothing recovered within ten minutes.
 
-That is a **provider-side handshake rate limit applied per device key**, not a
-property of individual relays. ICMP to the affected relays kept working
-throughout, and the key's tunnels were the only thing affected — a second
-Mullvad device on the same network kept running normally.
+That is a **provider-side restriction applied to the device key**, not a property
+of individual relays. ICMP to the affected relays kept working throughout, and
+only this key was affected — a second Mullvad device on the same network kept
+running normally, from the same hosts, for the whole episode.
+
+Observed timeline for one device key ("Fast Pike", 532 configs):
+
+```text
++00:00  sweep starts, concurrency 8, no pacing
++02:30  first failure, at completion #219
++03:44  sweep ends: 456 ok / 76 failed
++13:00  retry of the 76 from the same host:            0/76
++30:00  full sweep from a second host, direct internet: 0/532
++40:00  single canary on a slot that had just worked:   fail
++70:00  canary every 5 minutes, six attempts:          all fail
+```
+
+The key did not recover within roughly an hour of the last bulk activity, so this
+behaves less like a short cooldown and more like a longer-lived block on the
+device. If a key stops handshaking on every relay while another key on the same
+network keeps working, check whether the device still exists in the provider
+account and, if in doubt, create a fresh device and download a new bundle rather
+than waiting.
 
 ### Consequences
 
 - The practical ceiling for this bundle is **at least 456 and plausibly all 532**
-  distinct exit IPs, but it cannot be confirmed in one fast sweep.
+  distinct exit IPs. The remaining 76 stayed unverified: by the time they could be
+  retried, the key was already blocked, so their status is unknown rather than
+  bad.
+- Verify a large catalog in small paced batches spread over hours, and stop at the
+  first sign of rising failures instead of pushing through them.
 - Sweep large catalogs with `-interval` (e.g. `-interval 2s -concurrency 2`),
   ideally split across several sessions, and expect a full 532-slot inventory to
   take hours rather than minutes.
