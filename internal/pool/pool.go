@@ -159,6 +159,13 @@ type slotState struct {
 
 func (s *slotState) isOpen() bool { return s.tunnel != nil }
 
+// ready reports whether the slot can serve a request without opening a tunnel.
+// Relay-socks slots ride on the shared entries, so they never need one; a
+// WireGuard slot only qualifies while its own tunnel is up.
+func (s *slotState) ready() bool {
+	return s.spec.Kind == KindRelaySocks || s.isOpen()
+}
+
 func (s *slotState) coolingDown(target string, now time.Time) bool {
 	if target == "" || len(s.cooldowns) == 0 {
 		return false
@@ -424,20 +431,22 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 		return nil, false, ErrNoCandidate
 	}
 
-	// Prefer tunnels that are already up: opening one costs a handshake, and
-	// with a healthy active set there is still plenty of IP diversity.
-	open := candidates[:0:0]
+	// Prefer slots that need no handshake: relay-socks slots always, and
+	// WireGuard slots whose tunnel is already up. With a healthy active set there
+	// is still plenty of IP diversity among them.
+	ready := candidates[:0:0]
 	for _, state := range candidates {
-		if state.isOpen() {
-			open = append(open, state)
+		if state.ready() {
+			ready = append(ready, state)
 		}
 	}
-	if len(open) > 0 {
-		return open[p.rng.IntN(len(open))], false, nil
+	if len(ready) > 0 {
+		return ready[p.rng.IntN(len(ready))], false, nil
 	}
 
-	// Nothing open matches, so we must open one. Respect both budgets: how many
-	// tunnels may be up, and how fast new ones may be created.
+	// Only WireGuard slots that need a new tunnel are left, so the tunnel budgets
+	// apply. They must not gate relay-socks slots, which open nothing: doing so
+	// would fail requests the pool could serve.
 	if !p.tunnelBudgetAvailableLocked(now) {
 		return nil, false, ErrTunnelBudget
 	}

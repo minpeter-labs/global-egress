@@ -293,3 +293,40 @@ func TestStatsReportsEntries(t *testing.T) {
 		t.Errorf("Slots = %d, want 3", stats.Slots)
 	}
 }
+
+func TestTunnelBudgetDoesNotGateRelaySlots(t *testing.T) {
+	// Relay-socks slots exit through the shared entries, so serving one opens no
+	// tunnel. Spending the new-tunnel budget must therefore not stop them being
+	// selected; only opening an entry is subject to it.
+	p := newRelayPool(t, Options{NewTunnelBudget: 1, NewTunnelWindow: time.Hour})
+	now := time.Now()
+	p.noteTunnelOpen(now)
+
+	p.mu.Lock()
+	budgetLeft := p.tunnelBudgetAvailableLocked(now)
+	p.mu.Unlock()
+	if budgetLeft {
+		t.Fatal("test setup failed: the budget should be spent")
+	}
+
+	state, _, err := p.pick(policy.Policy{}, "example.com")
+	if err != nil {
+		t.Fatalf("pick returned %v; a relay slot needs no new tunnel", err)
+	}
+	if state == nil {
+		t.Fatal("pick returned no slot")
+	}
+	if state.spec.Kind != KindRelaySocks {
+		t.Errorf("picked kind %v, want relay-socks", state.spec.Kind)
+	}
+}
+
+func TestWireGuardSlotsStillGatedByBudget(t *testing.T) {
+	// The same budget must still apply to slots that do open a tunnel.
+	p := newTestPool(t, Options{NewTunnelBudget: 1, NewTunnelWindow: time.Hour})
+	p.noteTunnelOpen(time.Now())
+
+	if _, _, err := p.pick(policy.Policy{}, "example.com"); !errors.Is(err, ErrTunnelBudget) {
+		t.Fatalf("pick error = %v, want ErrTunnelBudget", err)
+	}
+}
