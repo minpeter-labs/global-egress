@@ -1,0 +1,13 @@
+# Provider bundles and extracted configs contain a WireGuard private key.
+.secrets/
+*.zip
+*.conf
+
+# Local runtime state and secrets
+.local-state/
+*.local.yaml
+config.yaml
+
+# Build output
+/bin/
+/dist/

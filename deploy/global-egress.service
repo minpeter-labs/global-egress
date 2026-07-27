@@ -1,0 +1,51 @@
+[Unit]
+Description=global-egress rotating WireGuard egress proxy
+Documentation=https://github.com/minpeter-labs/global-egress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/global-egress serve -config /etc/global-egress/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+# Tunnels run in userspace, so no NET_ADMIN and no tun device are required.
+User=global-egress
+Group=global-egress
+DynamicUser=no
+
+# The catalog holds a WireGuard private key; keep the state directory private.
+StateDirectory=global-egress
+StateDirectoryMode=0700
+ConfigurationDirectory=global-egress
+ConfigurationDirectoryMode=0750
+
+# Hundreds of tunnels mean hundreds of UDP sockets plus client connections.
+LimitNOFILE=65535
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

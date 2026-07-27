@@ -1,0 +1,78 @@
+# global-egress configuration
+#
+# Copy to /etc/global-egress/config.yaml and adjust. Every value shown here is
+# the built-in default unless noted otherwise.
+
+catalog:
+  # Directory of .conf files (written by "global-egress import") or a provider
+  # .zip. The files contain a private key, so keep the directory at mode 0700.
+  path: /var/lib/global-egress/wireguard
+
+listen:
+  # Bind to the internal address clients reach the service on. Never expose
+  # these ports to the internet.
+  socks5: 10.10.10.70:1080
+  http: 10.10.10.70:3128
+  control: 10.10.10.70:8080
+
+access:
+  # Only these CIDRs may use the proxy and the control API.
+  allowed_clients:
+    - 10.10.10.0/24
+  # Optional shared password for proxy clients. The username always carries the
+  # selection policy (cc=, sess=, uniq=, ...), never an identity.
+  password: ""
+  # password_file: /etc/global-egress/proxy-password
+  # Reject proxy clients that present no credentials at all.
+  require_auth: false
+  # Optional bearer token for the control API.
+  control_token: ""
+  # control_token_file: /etc/global-egress/control-token
+
+pool:
+  # Cap on simultaneously open tunnels. Each open tunnel costs memory and one
+  # UDP socket, so raise this only after measuring on the target host.
+  max_active: 25
+  # Bring this many tunnels up at startup so the first requests are fast.
+  preopen: 3
+  # Default lifetime of a sticky session (sess=...).
+  session_ttl: 10m
+  # How long a unique-IP batch (uniq=...) remembers the IPs it used.
+  batch_ttl: 15m
+  # Default cooldown applied when a client reports a block.
+  cooldown: 15m
+  # Close tunnels that have served nothing for this long.
+  idle_timeout: 10m
+  # Bound on bringing one tunnel up, including the WireGuard handshake.
+  handshake_timeout: 12s
+  # How many slots one request tries before giving up.
+  dial_attempts: 3
+  # Base backoff for a slot that failed; doubles per consecutive failure.
+  failure_backoff: 30s
+  # Bound on connecting to the destination through a tunnel.
+  dial_timeout: 30s
+  # Close relayed connections after this much inactivity.
+  relay_idle_timeout: 5m
+  # Endpoint used to learn a slot's public IP. Set to "" to disable IP
+  # measurement, which also disables unique-IP batches.
+  ip_check_url: https://am.i.mullvad.net/ip
+  ip_check_timeout: 15s
+  # How long a measured IP is trusted before it is re-checked.
+  ip_refresh_interval: 6h
+  # Simultaneous IP measurements. This hits a third-party service; keep it low.
+  ip_check_concurrency: 4
+
+destinations:
+  # Omit to use the built-in denylist (RFC1918, loopback, link-local, CGNAT,
+  # multicast, ...). Set to an empty list to disable filtering entirely.
+  # denied_cidrs:
+  #   - 10.0.0.0/8
+  # Optional destination port allowlist. Empty means all ports.
+  allowed_ports: []
+
+# Where the measured public-IP inventory is persisted.
+state_dir: /var/lib/global-egress
+
+log:
+  level: info
+  format: text
