@@ -281,6 +281,14 @@ type ProbeOptions struct {
 	// Country and City narrow the run.
 	Country string
 	City    string
+	// Slots, when non-empty, restricts the run to these slot IDs. It is applied
+	// before Country and City, and is how a previous run's failures are retried.
+	Slots []string
+	// Interval paces tunnel setup: at most one new tunnel is started per
+	// interval. Providers rate-limit handshakes per key, and a fast unpaced sweep
+	// of a large bundle will start failing part-way through, so pacing is the
+	// difference between measuring the catalog and measuring the rate limiter.
+	Interval time.Duration
 	// OnResult, when set, is called as each result completes.
 	OnResult func(ProbeResult)
 }
@@ -299,10 +307,25 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 		return nil
 	}
 
+	var wanted map[string]struct{}
+	if len(opts.Slots) > 0 {
+		wanted = make(map[string]struct{}, len(opts.Slots))
+		for _, id := range opts.Slots {
+			if id = strings.TrimSpace(id); id != "" {
+				wanted[id] = struct{}{}
+			}
+		}
+	}
+
 	p.mu.Lock()
 	var targets []*slotState
 	for _, id := range p.order {
 		state := p.slots[id]
+		if wanted != nil {
+			if _, ok := wanted[id]; !ok {
+				continue
+			}
+		}
 		if opts.Country != "" && !strings.EqualFold(state.spec.Country, opts.Country) {
 			continue
 		}
@@ -321,6 +344,13 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	var pace <-chan time.Time
+	if opts.Interval > 0 {
+		ticker := time.NewTicker(opts.Interval)
+		defer ticker.Stop()
+		pace = ticker.C
+	}
+
 	for i, state := range targets {
 		if ctx.Err() != nil {
 			break
@@ -333,6 +363,13 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 				defer func() { <-sem }()
 			case <-ctx.Done():
 				return
+			}
+			if pace != nil {
+				select {
+				case <-pace:
+				case <-ctx.Done():
+					return
+				}
 			}
 
 			result := ProbeResult{

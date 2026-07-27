@@ -132,10 +132,18 @@ func runProbe(ctx context.Context, args []string) error {
 	statePath := fs.String("state", "", "inventory file to update (optional)")
 	url := fs.String("url", "https://am.i.mullvad.net/ip", "echo endpoint returning the caller's public IP")
 	concurrency := fs.Int("concurrency", 8, "simultaneous tunnels")
+	interval := fs.Duration("interval", 0,
+		"minimum spacing between tunnel setups; providers rate-limit handshakes per key, "+
+			"so use e.g. 750ms when sweeping a large bundle")
 	limit := fs.Int("limit", 0, "stop after N slots (0 = all)")
 	country := fs.String("country", "", "only probe this country code")
 	city := fs.String("city", "", "only probe this city label, e.g. us-lax")
+	slots := fs.String("slots", "", "comma-separated slot ids to probe (for retrying failures)")
+	slotsFile := fs.String("slots-file", "", "file containing slot ids, comma or newline separated")
+	handshakeTimeout := fs.Duration("handshake-timeout", 12*time.Second,
+		"how long to wait for a WireGuard handshake before giving up on a slot")
 	verbose := fs.Bool("verbose", false, "log every measurement as it completes")
+	logLevelFlag := fs.String("log-level", "", "log level: debug, info, warn, error (debug includes WireGuard device logs)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -152,14 +160,32 @@ func runProbe(ctx context.Context, args []string) error {
 	if *verbose {
 		logLevel = slog.LevelInfo
 	}
+	switch strings.ToLower(*logLevelFlag) {
+	case "":
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		return fmt.Errorf("-log-level must be debug, info, warn or error")
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
 	egressPool, err := pool.New(bundle, pool.Options{
 		Logger:             logger,
 		IPCheckURL:         *url,
 		IPCheckConcurrency: *concurrency,
-		HandshakeTimeout:   12 * time.Second,
+		HandshakeTimeout:   *handshakeTimeout,
 	})
+	if err != nil {
+		return err
+	}
+
+	selected, err := collectSlotIDs(*slots, *slotsFile)
 	if err != nil {
 		return err
 	}
@@ -180,6 +206,8 @@ func runProbe(ctx context.Context, args []string) error {
 		Limit:       *limit,
 		Country:     *country,
 		City:        *city,
+		Slots:       selected,
+		Interval:    *interval,
 		OnResult: func(result pool.ProbeResult) {
 			done++
 			if result.Err != "" {
@@ -228,6 +256,34 @@ func runProbe(ctx context.Context, args []string) error {
 		fmt.Printf("\ninventory written to %s\n", *statePath)
 	}
 	return ctx.Err()
+}
+
+// collectSlotIDs merges the -slots flag and -slots-file into one list.
+func collectSlotIDs(inline, path string) ([]string, error) {
+	raw := inline
+	if path != "" {
+		blob, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read -slots-file: %w", err)
+		}
+		if raw != "" {
+			raw += ","
+		}
+		raw += string(blob)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
+	})
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field = strings.TrimSpace(field); field != "" {
+			out = append(out, field)
+		}
+	}
+	return out, nil
 }
 
 func firstLine(value string) string {

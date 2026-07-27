@@ -51,8 +51,11 @@ global-egress import -zip ~/mullvad-all.zip -dir /var/lib/global-egress/wireguar
 global-egress inspect -catalog /var/lib/global-egress/wireguard
 
 # 3. Measure how many *distinct* exit IPs the bundle really provides.
+#    Pace it: providers rate-limit handshakes per device key, and an unpaced
+#    sweep of a large bundle starts failing part-way through.
 global-egress probe -catalog /var/lib/global-egress/wireguard \
-  -state /var/lib/global-egress/inventory.json -limit 50 -concurrency 8
+  -state /var/lib/global-egress/inventory.json \
+  -concurrency 2 -interval 2s
 
 # 4. Run the service.
 cp deploy/config.example.yaml /etc/global-egress/config.yaml
@@ -179,10 +182,17 @@ sidesteps the conflict entirely and needs no privileges.
 once. Tunnels open on demand, idle ones are closed, and the least recently used
 one is evicted when the budget is full. Start low, measure, then raise it.
 
-**Slot count is not IP count.** Providers routinely share one public address
-across several servers. `global-egress probe` measures the real exit IP of each
-slot and stores an inventory, and `uniq=` batches are enforced against those
-measured addresses rather than server names.
+**Slot count is not IP count — verify it.** `global-egress probe` measures the
+real exit IP of each slot and stores an inventory, and `uniq=` batches are
+enforced against those measured addresses rather than server names. On a 532-slot
+Mullvad bundle every reachable slot turned out to have its own address (456
+slots, 456 distinct IPs), but that is a property of the provider, not a promise.
+
+**Bulk probing hits provider rate limits.** Sweeping a large bundle quickly gets
+the device key throttled, after which every handshake fails for a while. Use
+`-interval` and low `-concurrency`, and see [docs/capacity.md](docs/capacity.md)
+for the measurements. Serving traffic is unaffected, because tunnels open on
+demand under the `max_active` budget.
 
 **DNS stays in the tunnel.** Host names are resolved through the resolvers in the
 slot's own configuration (`10.64.0.1` for Mullvad), so lookups never fall back to
@@ -219,6 +229,9 @@ Reference implementations that informed the design are collected separately in
 - IP selection happens per **connection**. A client reusing one keep-alive
   connection keeps the same exit IP; make a new connection (or change `sess=`) to
   move.
-- `uniq=` can only guarantee as many distinct IPs as the bundle actually has.
+- `uniq=` can only guarantee as many distinct IPs as the bundle actually has, and
+  only for slots whose IP has been measured.
+- Measuring a whole large bundle takes hours, because handshakes must be paced to
+  stay under the provider's per-key rate limit.
 - Not an anonymity tool. The provider still sees the tunnel, and the service logs
   which slot served which destination.
