@@ -67,7 +67,9 @@ func (s *SOCKS5Server) Serve(ctx context.Context, listener net.Listener) error {
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				// The listener was closed because we are shutting down, which is a
+				// normal end of service rather than a failure.
+				return nil //nolint:nilerr // shutdown, not an error
 			}
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {

@@ -124,7 +124,9 @@ func (g *Guard) CheckResolved(addr net.Addr) error {
 	}
 	parsed, err := netip.ParseAddr(host)
 	if err != nil {
-		return nil
+		// Not an address literal, so there is nothing here to evaluate. The name
+		// was already vetted by CheckHost.
+		return nil //nolint:nilerr // an unparsable peer address is not a policy violation
 	}
 	return g.CheckAddr(parsed)
 }

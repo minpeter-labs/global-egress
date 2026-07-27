@@ -21,7 +21,7 @@ func TestCostPrefersNearbyEntries(t *testing.T) {
 	fromJP := Cost("jp", "jp")
 	fromSG := Cost("sg", "jp")
 	fromDE := Cost("de", "jp")
-	if !(fromJP < fromSG && fromSG < fromDE) {
+	if fromJP >= fromSG || fromSG >= fromDE {
 		t.Errorf("expected jp < sg < de for a jp exit, got %d, %d, %d", fromJP, fromSG, fromDE)
 	}
 

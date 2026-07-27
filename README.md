@@ -254,12 +254,14 @@ documented there.
 ```sh
 make build   # build ./bin/global-egress
 make test    # go test ./...
-make check   # gofmt check, go vet, tests
+make lint    # golangci-lint
+make check   # formatting (gofumpt + goimports), vet, lint, tests
 make run     # run with config.local.yaml
 ```
 
-Reference implementations that informed the design are collected separately in
-`~/github.com/tmp/global-egress-references`.
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Limitations
 

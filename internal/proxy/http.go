@@ -316,8 +316,9 @@ func splitTargetHostPort(value string, defaultPort int) (string, int, error) {
 	}
 	host, portStr, err := net.SplitHostPort(value)
 	if err != nil {
-		// No port present.
-		return strings.Trim(value, "[]"), defaultPort, nil
+		// No port present, which is normal for an absolute URI host. Fall back to
+		// the scheme's default port rather than rejecting the request.
+		return strings.Trim(value, "[]"), defaultPort, nil //nolint:nilerr // a missing port is not an error
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {

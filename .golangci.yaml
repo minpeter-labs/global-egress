@@ -1,0 +1,49 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    # Formatting is enforced separately by gofumpt/goimports in CI, so these are
+    # the correctness and hygiene checks that a formatter cannot see.
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - nilerr
+    - unconvert
+    - wastedassign
+
+  settings:
+    errcheck:
+      # An explicit `_ =` already documents a deliberately ignored error.
+      check-blank: false
+      # Closing a reader, a connection or a response body on the way out cannot
+      # fail in a way the caller could act on, and neither can writing usage text
+      # to stderr. Excluding them here beats repeating a no-op check 11 times.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (net.Conn).Close
+        - (*archive/zip.ReadCloser).Close
+        - fmt.Fprintf
+        - fmt.Fprint
+        - fmt.Fprintln
+
+  exclusions:
+    rules:
+      # Tests may ignore errors more freely; the assertions are the point.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/minpeter-labs/global-egress

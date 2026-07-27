@@ -253,7 +253,7 @@ func (p *Pool) dialerForSocksSlot(ctx context.Context, state *slotState) (Dialer
 		return dialer, entry.spec.ID, nil
 	}
 	if lastErr != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrExhausted, lastErr)
+		return nil, "", fmt.Errorf("%w: %w", ErrExhausted, lastErr)
 	}
 	return nil, "", ErrExhausted
 }

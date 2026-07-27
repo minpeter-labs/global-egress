@@ -6,7 +6,10 @@ LDFLAGS := -X main.version=$(VERSION)
 # Local development config; ignored by git.
 LOCAL_CONFIG ?= config.local.yaml
 
-.PHONY: all build install test check fmt vet tidy clean run probe inspect
+GOBIN := $(shell go env GOPATH)/bin
+GOFILES := $(shell find cmd internal -name '*.go')
+
+.PHONY: all build build-static install test race vet fmt fmtcheck lint tools tidy check run probe inspect relays clean
 
 all: check build
 
@@ -30,25 +33,41 @@ race:
 vet:
 	go vet ./...
 
-fmt:
-	gofmt -w $(shell find cmd internal -name '*.go')
+# gofumpt is a strict superset of gofmt, and goimports keeps the standard /
+# external / local import groups tidy. Formatting is therefore checked with these
+# rather than with gofmt directly.
+fmt: tools
+	$(GOBIN)/gofumpt -w $(GOFILES)
+	$(GOBIN)/goimports -local github.com/minpeter-labs/global-egress -w $(GOFILES)
 
-fmtcheck:
-	@unformatted="$$(gofmt -l $$(find cmd internal -name '*.go'))"; \
-	if [ -n "$$unformatted" ]; then \
-		echo "gofmt needed:"; echo "$$unformatted"; exit 1; \
+fmtcheck: tools
+	@out="$$($(GOBIN)/gofumpt -l $(GOFILES); $(GOBIN)/goimports -local github.com/minpeter-labs/global-egress -l $(GOFILES))"; \
+	if [ -n "$$out" ]; then \
+		echo "formatting needed (run 'make fmt'):"; echo "$$out" | sort -u; exit 1; \
 	fi
+
+lint: tools
+	$(GOBIN)/golangci-lint run ./...
+
+# Pinned so CI and local runs agree.
+tools:
+	@command -v $(GOBIN)/gofumpt >/dev/null || go install mvdan.cc/gofumpt@v0.11.0
+	@command -v $(GOBIN)/goimports >/dev/null || go install golang.org/x/tools/cmd/goimports@latest
+	@command -v $(GOBIN)/golangci-lint >/dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
 tidy:
 	go mod tidy
 
-check: fmtcheck vet test
+check: fmtcheck vet lint test
 
 run: build
 	./bin/$(BINARY) serve -config $(LOCAL_CONFIG)
 
 inspect: build
 	./bin/$(BINARY) inspect -catalog $(CATALOG)
+
+relays: build
+	./bin/$(BINARY) relays -cache .local-state/relays.json
 
 probe: build
 	./bin/$(BINARY) probe -catalog $(CATALOG) -limit $(or $(LIMIT),25) -concurrency $(or $(CONCURRENCY),8)

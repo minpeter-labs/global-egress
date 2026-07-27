@@ -17,12 +17,18 @@ import (
 
 func testRelays() []relaylist.Relay {
 	return []relaylist.Relay{
-		{Hostname: "jp-tyo-wg-001", Country: "jp", CityCode: "tyo", Active: true,
-			SocksName: "jp-tyo-wg-socks5-001.relays.example", SocksPort: 1080},
-		{Hostname: "de-fra-wg-001", Country: "de", CityCode: "fra", Active: true,
-			SocksName: "de-fra-wg-socks5-001.relays.example", SocksPort: 1080},
-		{Hostname: "us-lax-wg-001", Country: "us", CityCode: "lax", Active: true,
-			SocksName: "us-lax-wg-socks5-001.relays.example", SocksPort: 1080},
+		{
+			Hostname: "jp-tyo-wg-001", Country: "jp", CityCode: "tyo", Active: true,
+			SocksName: "jp-tyo-wg-socks5-001.relays.example", SocksPort: 1080,
+		},
+		{
+			Hostname: "de-fra-wg-001", Country: "de", CityCode: "fra", Active: true,
+			SocksName: "de-fra-wg-socks5-001.relays.example", SocksPort: 1080,
+		},
+		{
+			Hostname: "us-lax-wg-001", Country: "us", CityCode: "lax", Active: true,
+			SocksName: "us-lax-wg-socks5-001.relays.example", SocksPort: 1080,
+		},
 	}
 }
 

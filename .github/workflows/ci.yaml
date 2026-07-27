@@ -19,15 +19,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l $(find cmd internal -name '*.go'))"
-          if [ -n "$unformatted" ]; then
-            echo "these files need gofmt:"; echo "$unformatted"; exit 1
-          fi
+      - name: formatting (gofumpt + goimports)
+        run: make fmtcheck
 
       - name: vet
         run: go vet ./...
+
+      - name: lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
 
       - name: test
         run: go test ./...
