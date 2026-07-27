@@ -256,8 +256,8 @@ func TestEgressHeadersReportTheAppliedPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	headers = egressHeaders(lease, deliberate)
-	if got := headers["X-Egress-Policy"]; got != "any" {
-		t.Errorf("X-Egress-Policy for any=1 = %q, want any", got)
+	if got := headers["X-Egress-Policy"]; got != "any=1" {
+		t.Errorf("X-Egress-Policy for any=1 = %q, want any=1", got)
 	}
 }
 

@@ -71,7 +71,9 @@ func (p Policy) IsZero() bool {
 func (p Policy) String() string {
 	var parts []string
 	if p.AnyExit {
-		parts = append(parts, "any")
+		// Rendered with its value so the output stays parseable: every directive in
+		// this grammar is key=value, and String is documented to round-trip.
+		parts = append(parts, "any=1")
 	}
 	if len(p.Countries) > 0 {
 		parts = append(parts, "cc="+strings.Join(p.Countries, "|"))

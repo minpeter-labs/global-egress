@@ -211,7 +211,7 @@ Two things help catch the mistake anyway:
 
   `any=1` composes with `sess=`, `ttl=`, `uniq=` and `not=`, and is rejected
   alongside `cc=`, `city=` or `slot=`, which would contradict it. The response header
-  distinguishes the two cases as well: `X-Egress-Policy: any` versus
+  distinguishes the two cases as well: `X-Egress-Policy: any=1` versus
   `X-Egress-Policy: (none)`.
 
 Every response reports the egress that served it:

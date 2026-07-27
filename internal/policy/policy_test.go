@@ -136,8 +136,29 @@ func TestStringDistinguishesNothingFromAnywhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if got := anywhere.String(); got != "any" {
-		t.Errorf("any=1 String() = %q, want any", got)
+	if got := anywhere.String(); got != "any=1" {
+		t.Errorf("any=1 String() = %q, want any=1", got)
+	}
+}
+
+func TestAnyRoundTripsThroughString(t *testing.T) {
+	t.Parallel()
+	// String is documented to round-trip, and it is what the X-Egress-Policy header
+	// carries, so a rendering the parser rejects would be a quiet inconsistency.
+	original, err := Parse("any=1;sess=job-1;uniq=b1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := original.String()
+	reparsed, err := Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", rendered, err)
+	}
+	if reparsed.String() != rendered {
+		t.Errorf("round trip changed the policy: %q -> %q", rendered, reparsed.String())
+	}
+	if !reparsed.AnyExit {
+		t.Error("AnyExit lost in the round trip")
 	}
 }
 
