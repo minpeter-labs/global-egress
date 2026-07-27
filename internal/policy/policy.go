@@ -10,6 +10,7 @@
 //
 // Recognised directives:
 //
+//	any=1         no location constraint, chosen deliberately
 //	cc=jp|us      restrict to these country codes
 //	city=us-lax   restrict to these city labels
 //	slot=id       pin one specific slot (mainly for debugging)
@@ -33,6 +34,14 @@ import (
 
 // Policy is a parsed client selection request.
 type Policy struct {
+	// AnyExit records that the client explicitly asked for no location
+	// constraint.
+	//
+	// It exists to separate intent from accident. An empty policy can mean either
+	// "anywhere is fine" or "my directives never arrived", and those deserve
+	// different treatment when the operator has made a policy mandatory. Saying
+	// any=1 is how a caller opts into the first meaning.
+	AnyExit bool
 	// Countries restricts selection to these ISO-3166-1 alpha-2 codes.
 	Countries []string
 	// Cities restricts selection to these "<country>-<city>" labels.
@@ -50,9 +59,10 @@ type Policy struct {
 	ExcludeIPs []netip.Addr
 }
 
-// IsZero reports whether the policy carries no constraints at all.
+// IsZero reports whether the client expressed nothing at all. An explicit any=1 is
+// an expression, so it is not zero.
 func (p Policy) IsZero() bool {
-	return len(p.Countries) == 0 && len(p.Cities) == 0 && p.Slot == "" &&
+	return !p.AnyExit && len(p.Countries) == 0 && len(p.Cities) == 0 && p.Slot == "" &&
 		p.Session == "" && p.TTL == 0 && p.UniqueBatch == "" && len(p.ExcludeIPs) == 0
 }
 
@@ -60,6 +70,9 @@ func (p Policy) IsZero() bool {
 // it safe and useful for logging (it never contains the password).
 func (p Policy) String() string {
 	var parts []string
+	if p.AnyExit {
+		parts = append(parts, "any")
+	}
 	if len(p.Countries) > 0 {
 		parts = append(parts, "cc="+strings.Join(p.Countries, "|"))
 	}
@@ -82,7 +95,10 @@ func (p Policy) String() string {
 		parts = append(parts, "not="+ip.String())
 	}
 	if len(parts) == 0 {
-		return "(any)"
+		// Distinct from "any": nothing was supplied, rather than "anywhere" being
+		// asked for. The two look the same in behaviour and different in intent,
+		// and a header or log line should say which happened.
+		return "(none)"
 	}
 	return strings.Join(parts, ";")
 }
@@ -126,6 +142,12 @@ func Parse(username string) (Policy, error) {
 		}
 
 		switch key {
+		case "any":
+			enabled, err := parseBool(value)
+			if err != nil {
+				return Policy{}, err
+			}
+			p.AnyExit = enabled
 		case "cc", "country":
 			p.Countries = appendLower(p.Countries, value)
 		case "city":
@@ -161,6 +183,17 @@ func Parse(username string) (Policy, error) {
 	return p, nil
 }
 
+// parseBool accepts the spellings people actually type in a proxy username.
+func parseBool(value string) (bool, error) {
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "y":
+		return true, nil
+	case "0", "false", "no", "n":
+		return false, nil
+	}
+	return false, fmt.Errorf("policy: any=%q is not a boolean", value)
+}
+
 func (p *Policy) validate() error {
 	for _, cc := range p.Countries {
 		if len(cc) != 2 {
@@ -174,6 +207,24 @@ func (p *Policy) validate() error {
 	}
 	if p.TTL < 0 {
 		return fmt.Errorf("policy: ttl must not be negative")
+	}
+	// any= is about location, so it contradicts the directives that pin one, but
+	// composes fine with session stickiness and unique batches.
+	if p.AnyExit {
+		var conflicts []string
+		if len(p.Countries) > 0 {
+			conflicts = append(conflicts, "cc")
+		}
+		if len(p.Cities) > 0 {
+			conflicts = append(conflicts, "city")
+		}
+		if p.Slot != "" {
+			conflicts = append(conflicts, "slot")
+		}
+		if len(conflicts) > 0 {
+			return fmt.Errorf("policy: any= means no location constraint, so it cannot be "+
+				"combined with %s", strings.Join(conflicts, ", "))
+		}
 	}
 	sort.Strings(p.Countries)
 	sort.Strings(p.Cities)

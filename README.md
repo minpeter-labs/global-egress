@@ -151,6 +151,7 @@ curl -x http://egress.example.internal:3128 --proxy-user 'uniq=batch-7:x'    htt
 
 | Directive | Meaning |
 |---|---|
+| `any=1` | No location constraint, chosen deliberately |
 | `cc=jp` | Restrict to a country. Several: `cc=jp\|us` |
 | `city=us-lax` | Restrict to a city |
 | `slot=us-lax-wg-001` | Pin one specific slot, mainly for debugging |
@@ -197,6 +198,21 @@ Two things help catch the mistake anyway:
   ```
 
   Turn it on wherever an unnoticed fallback to a random exit would be a bug.
+
+  Callers who genuinely want any exit are not locked out: `any=1` says so
+  explicitly and is accepted. That is the whole point of the directive — it
+  separates "anywhere is fine" from "my directives never arrived", which behave
+  identically and mean opposite things.
+
+  ```sh
+  curl -x http://egress.example.internal:3128 --proxy-user 'any=1:x'          https://…
+  curl -x http://egress.example.internal:3128 --proxy-user 'any=1;sess=job-1:x' https://…
+  ```
+
+  `any=1` composes with `sess=`, `ttl=`, `uniq=` and `not=`, and is rejected
+  alongside `cc=`, `city=` or `slot=`, which would contradict it. The response header
+  distinguishes the two cases as well: `X-Egress-Policy: any` versus
+  `X-Egress-Policy: (none)`.
 
 Every response reports the egress that served it:
 

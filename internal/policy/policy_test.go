@@ -123,10 +123,88 @@ func TestStringRoundTrips(t *testing.T) {
 	}
 }
 
-func TestStringForEmptyPolicy(t *testing.T) {
+func TestStringDistinguishesNothingFromAnywhere(t *testing.T) {
 	t.Parallel()
-	var pol Policy
-	if got := pol.String(); got != "(any)" {
-		t.Errorf("String() = %q, want (any)", got)
+	// These behave identically and mean different things. A header or log line that
+	// cannot tell them apart is how a dropped policy goes unnoticed.
+	var nothing Policy
+	if got := nothing.String(); got != "(none)" {
+		t.Errorf("empty policy String() = %q, want (none)", got)
+	}
+
+	anywhere, err := Parse("any=1")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := anywhere.String(); got != "any" {
+		t.Errorf("any=1 String() = %q, want any", got)
+	}
+}
+
+func TestAnyIsAnExpressedPolicy(t *testing.T) {
+	t.Parallel()
+	// The point of any=1: it places no constraint, yet counts as having said
+	// something, so require_policy accepts it while still rejecting silence.
+	var nothing Policy
+	if !nothing.IsZero() {
+		t.Error("an empty policy should be zero")
+	}
+
+	anywhere, err := Parse("any=1")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if anywhere.IsZero() {
+		t.Error("any=1 should not be zero: the client did express something")
+	}
+	if len(anywhere.Countries) != 0 || anywhere.Slot != "" {
+		t.Error("any=1 must not add constraints")
+	}
+}
+
+func TestAnyAcceptsCommonSpellings(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"1", "true", "yes", "y", "TRUE"} {
+		pol, err := Parse("any=" + value)
+		if err != nil {
+			t.Errorf("any=%s: %v", value, err)
+			continue
+		}
+		if !pol.AnyExit {
+			t.Errorf("any=%s did not set AnyExit", value)
+		}
+	}
+	for _, value := range []string{"0", "false", "no"} {
+		pol, err := Parse("any=" + value)
+		if err != nil {
+			t.Errorf("any=%s: %v", value, err)
+			continue
+		}
+		if pol.AnyExit {
+			t.Errorf("any=%s set AnyExit", value)
+		}
+	}
+	if _, err := Parse("any=maybe"); err == nil {
+		t.Error("any=maybe should be rejected")
+	}
+}
+
+func TestAnyComposesWithSessionButNotLocation(t *testing.T) {
+	t.Parallel()
+	// "anywhere, but keep me on it" is a real request.
+	pol, err := Parse("any=1;sess=job-1;uniq=b1")
+	if err != nil {
+		t.Fatalf("any with session and batch: %v", err)
+	}
+	if !pol.AnyExit || pol.Session != "job-1" || pol.UniqueBatch != "b1" {
+		t.Errorf("unexpected policy %v", pol)
+	}
+
+	// "anywhere in Japan" is not: it contradicts itself, and silently letting one
+	// side win would be worse than saying so.
+	for _, input := range []string{"any=1;cc=jp", "any=1;city=us-lax", "any=1;slot=x"} {
+		if _, err := Parse(input); err == nil {
+			t.Errorf("Parse(%q) succeeded, want a conflict error", input)
+		}
 	}
 }
