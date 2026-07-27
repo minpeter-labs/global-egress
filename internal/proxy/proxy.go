@@ -177,7 +177,7 @@ func replyCodeFor(err error) byte {
 	case err == nil:
 		return repSuccess
 	case errors.Is(err, pool.ErrNoCandidate), errors.Is(err, pool.ErrCapacity),
-		errors.Is(err, pool.ErrTunnelBudget):
+		errors.Is(err, pool.ErrTunnelBudget), errors.Is(err, pool.ErrBusy):
 		return repNotAllowed
 	case errors.Is(err, pool.ErrExhausted):
 		return repHostUnreachable

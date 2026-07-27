@@ -109,6 +109,12 @@ type PoolConfig struct {
 	// Preopen brings this many tunnels up at startup so the first requests do
 	// not pay for a handshake.
 	Preopen int `yaml:"preopen"`
+	// MaxConnsPerExit caps concurrent connections through one exit, so load is
+	// spread over relays instead of concentrated on one. Zero disables it.
+	MaxConnsPerExit int `yaml:"max_conns_per_exit"`
+	// MaxConcurrentConns caps concurrent connections across the pool. Zero
+	// disables it.
+	MaxConcurrentConns int `yaml:"max_concurrent_conns"`
 	// SessionTTL is the default sticky-session lifetime.
 	SessionTTL time.Duration `yaml:"session_ttl"`
 	// BatchTTL is how long a unique-IP batch is remembered.
@@ -284,6 +290,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Pool.Preopen < 0 {
 		return fmt.Errorf("config: pool.preopen must not be negative")
+	}
+	if c.Pool.MaxConnsPerExit < 0 {
+		return fmt.Errorf("config: pool.max_conns_per_exit must not be negative")
+	}
+	if c.Pool.MaxConcurrentConns < 0 {
+		return fmt.Errorf("config: pool.max_concurrent_conns must not be negative")
 	}
 	if c.Pool.EntryExploreRate < 0 || c.Pool.EntryExploreRate >= 1 {
 		return fmt.Errorf("config: pool.entry_explore_rate must be in [0, 1)")

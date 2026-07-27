@@ -4,8 +4,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/minpeter-labs/global-egress.svg)](https://pkg.go.dev/github.com/minpeter-labs/global-egress)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Turn a **Mullvad** subscription into an internal rotating egress proxy: one
-endpoint, hundreds of exit addresses.
+**Mullvad-first, WireGuard-general.** Turn a Mullvad subscription into an internal
+rotating egress proxy: one endpoint, hundreds of exit addresses. Any other
+WireGuard provider works too, at one exit address per tunnel.
 
 Point it at Mullvad's "all servers" WireGuard zip and it exposes every relay's exit
 address behind a single internal proxy. Clients pick a country, pin a sticky

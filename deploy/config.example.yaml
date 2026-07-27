@@ -64,6 +64,13 @@ pool:
   max_active: 25
   # Bring this many tunnels up at startup so the first requests are fast.
   preopen: 3
+  # Spread load across exits rather than concentrating it. In relay-socks mode an
+  # exit is a provider proxy shared with other customers, so a client pointing
+  # hundreds of connections at one relay is both rude and conspicuous.
+  max_conns_per_exit: 8
+  # Backstop for the whole pool, so a runaway client cannot turn into pressure on
+  # the provider. Requests over the limit get 503 and may retry.
+  max_concurrent_conns: 256
   # Default lifetime of a sticky session (sess=...).
   session_ttl: 10m
   # How long a unique-IP batch (uniq=...) remembers the IPs it used.

@@ -329,3 +329,62 @@ func TestWireGuardSlotsStillGatedByBudget(t *testing.T) {
 		t.Fatalf("pick error = %v, want ErrTunnelBudget", err)
 	}
 }
+
+func TestPerExitConnectionLimitSpreadsLoad(t *testing.T) {
+	// An exit at its connection limit must stop being a candidate, so load moves
+	// to another relay instead of piling onto one.
+	p := newRelayPool(t, Options{MaxConnsPerExit: 2})
+	now := time.Now()
+
+	p.mu.Lock()
+	state := p.slots["jp-tyo-wg-socks5-001"]
+	state.leases = 2
+	atLimit := p.eligibleLocked(state, policy.Policy{}, "example.com", now)
+	other := p.slots["de-fra-wg-socks5-001"]
+	stillFree := p.eligibleLocked(other, policy.Policy{}, "example.com", now)
+	p.mu.Unlock()
+
+	if atLimit {
+		t.Error("an exit at its per-exit limit should not be eligible")
+	}
+	if !stillFree {
+		t.Error("an idle exit should remain eligible")
+	}
+
+	// With the country pinned to the saturated exit there is nothing left to pick.
+	if _, err := p.Acquire(context.Background(), policy.Policy{Countries: []string{"jp"}}, "example.com"); !errors.Is(err, ErrNoCandidate) {
+		t.Errorf("error = %v, want ErrNoCandidate once the only jp exit is saturated", err)
+	}
+}
+
+func TestGlobalConnectionLimitRefusesWithErrBusy(t *testing.T) {
+	p := newRelayPool(t, Options{MaxConcurrentConns: 3})
+
+	p.mu.Lock()
+	p.leased = 3
+	p.mu.Unlock()
+
+	_, err := p.Acquire(context.Background(), policy.Policy{}, "example.com")
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("error = %v, want ErrBusy", err)
+	}
+	if got := p.Stats().Busy; got == 0 {
+		t.Error("refusals should be counted in stats")
+	}
+
+	// The limit is about load, so it clears as connections finish.
+	p.mu.Lock()
+	p.leased = 0
+	p.mu.Unlock()
+	if _, _, err := p.pick(policy.Policy{}, "example.com"); err != nil {
+		t.Errorf("pick after the load cleared = %v, want success", err)
+	}
+}
+
+func TestStatsReportConnectionLimits(t *testing.T) {
+	p := newRelayPool(t, Options{MaxConnsPerExit: 4, MaxConcurrentConns: 64})
+	stats := p.Stats()
+	if stats.MaxConnsPerExit != 4 || stats.MaxConcurrentConns != 64 {
+		t.Errorf("limits not reported: %+v", stats)
+	}
+}

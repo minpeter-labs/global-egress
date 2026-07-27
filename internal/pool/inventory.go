@@ -110,6 +110,11 @@ type Stats struct {
 	// Entries counts the shared entry tunnels that relay-socks slots ride on.
 	Entries     int `json:"entries"`
 	EntriesOpen int `json:"entries_open"`
+	// MaxConnsPerExit and MaxConcurrentConns report the configured connection
+	// limits, and Busy counts requests refused because the global one was reached.
+	MaxConnsPerExit    int    `json:"max_conns_per_exit"`
+	MaxConcurrentConns int    `json:"max_concurrent_conns"`
+	Busy               uint64 `json:"refused_busy"`
 	// NewTunnelsUsed is how much of the new-tunnel rate budget has been spent in
 	// the current window, and NewTunnelBudget is the cap. Watching these tells
 	// you whether rotation requests are being slowed down to protect the key.
@@ -130,18 +135,21 @@ func (p *Pool) Stats() Stats {
 	now := time.Now()
 	p.pruneOpensLocked(now)
 	stats := Stats{
-		Slots:           len(p.slots),
-		Sessions:        len(p.sessions),
-		Batches:         len(p.batches),
-		MaxActive:       p.opts.MaxActive,
-		Entries:         len(p.entries),
-		NewTunnelsUsed:  len(p.opens),
-		NewTunnelBudget: p.opts.NewTunnelBudget,
-		NewTunnelWindow: p.opts.NewTunnelWindow.String(),
-		Acquisitions:    p.statAcquired,
-		Rotations:       p.statRotated,
-		Reports:         p.statReports,
-		Failures:        p.statFailures,
+		Slots:              len(p.slots),
+		Sessions:           len(p.sessions),
+		Batches:            len(p.batches),
+		MaxActive:          p.opts.MaxActive,
+		Entries:            len(p.entries),
+		MaxConnsPerExit:    p.opts.MaxConnsPerExit,
+		MaxConcurrentConns: p.opts.MaxConcurrentConns,
+		Busy:               p.statBusy,
+		NewTunnelsUsed:     len(p.opens),
+		NewTunnelBudget:    p.opts.NewTunnelBudget,
+		NewTunnelWindow:    p.opts.NewTunnelWindow.String(),
+		Acquisitions:       p.statAcquired,
+		Rotations:          p.statRotated,
+		Reports:            p.statReports,
+		Failures:           p.statFailures,
 	}
 	ips := make(map[netip.Addr]struct{})
 	countries := make(map[string]struct{})

@@ -1,5 +1,9 @@
 # Contributing
 
+`global-egress` is Mullvad-first and WireGuard-general: the default mode depends on
+Mullvad's relay proxies, while the fallback mode works with any WireGuard bundle.
+Keeping that split visible is a design goal, not an accident.
+
 ## Local development
 
 ```sh

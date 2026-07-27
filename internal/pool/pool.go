@@ -35,12 +35,27 @@ var (
 	// ErrTunnelBudget means the new-tunnel rate budget is spent. Serving from an
 	// already-open tunnel is still possible; only opening another one is not.
 	ErrTunnelBudget = errors.New("pool: new-tunnel rate budget exhausted")
+	// ErrBusy means the concurrent-connection limit is reached. Unlike the other
+	// failures this one is purely about load and clears as connections finish.
+	ErrBusy = errors.New("pool: too many concurrent connections")
 )
 
 // Options configures a Pool.
 type Options struct {
 	// MaxActive caps how many tunnels may be up at once. Zero means "all slots".
 	MaxActive int
+	// MaxConnsPerExit caps concurrent connections through one exit. Zero disables
+	// the limit.
+	//
+	// In relay-socks mode an exit is a provider proxy shared with every other
+	// customer, and nothing else here would stop a client pointing hundreds of
+	// connections at a single relay. Spreading load is both politer and less
+	// likely to look like abuse.
+	MaxConnsPerExit int
+	// MaxConcurrentConns caps concurrent connections across the whole pool. Zero
+	// disables the limit. This is the backstop that keeps a runaway client from
+	// turning into pressure on the provider.
+	MaxConcurrentConns int
 	// SessionTTL is the default lifetime of a sticky session.
 	SessionTTL time.Duration
 	// BatchTTL is how long a unique-IP batch remembers the IPs it used.
@@ -114,6 +129,12 @@ func (o *Options) applyDefaults() {
 	}
 	// A negative rate cannot be expressed as "off" here, because zero has to mean
 	// "use the default"; DisableEntryExploration is the explicit switch.
+	if o.MaxConnsPerExit < 0 {
+		o.MaxConnsPerExit = 0
+	}
+	if o.MaxConcurrentConns < 0 {
+		o.MaxConcurrentConns = 0
+	}
 	if o.EntryExploreRate <= 0 {
 		o.EntryExploreRate = 0.1
 	}
@@ -217,8 +238,12 @@ type Pool struct {
 	// wg tracks every goroutine the pool owns, so Close can wait for them.
 	wg sync.WaitGroup
 
+	// leased is the number of connections currently held across all slots.
+	leased int
+
 	// counters, protected by mu
 	statAcquired uint64
+	statBusy     uint64
 	statRotated  uint64
 	statReports  uint64
 	statFailures uint64
@@ -334,6 +359,9 @@ func (l *Lease) Release() {
 	if l.state.leases > 0 {
 		l.state.leases--
 	}
+	if l.pool.leased > 0 {
+		l.pool.leased--
+	}
 	l.state.lastUsed = time.Now()
 	l.pool.mu.Unlock()
 }
@@ -367,6 +395,7 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 
 		p.mu.Lock()
 		state.leases++
+		p.leased++
 		state.lastUsed = time.Now()
 		state.failures = 0
 		state.lastError = ""
@@ -407,6 +436,11 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 
 	now := time.Now()
 	p.expireLocked(now)
+
+	if p.opts.MaxConcurrentConns > 0 && p.leased >= p.opts.MaxConcurrentConns {
+		p.statBusy++
+		return nil, false, ErrBusy
+	}
 
 	// A live sticky session wins, as long as the slot is still usable.
 	if pol.Session != "" {
@@ -474,6 +508,11 @@ func (p *Pool) eligibleLocked(state *slotState, pol policy.Policy, target string
 		return false
 	}
 	if state.coolingDown(target, now) {
+		return false
+	}
+	// Spread load: an exit already at its connection limit is not a candidate,
+	// even if it is otherwise the best match.
+	if p.opts.MaxConnsPerExit > 0 && state.leases >= p.opts.MaxConnsPerExit {
 		return false
 	}
 	if len(pol.ExcludeIPs) > 0 && state.publicIP.IsValid() {
