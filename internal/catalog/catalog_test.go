@@ -10,14 +10,14 @@ import (
 
 const sampleConf = `[Interface]
 # Device: Fast Pike
-PrivateKey = QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=
+PrivateKey = R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=
 Address = 10.64.232.4/32,fc00:bbbb:bbbb:bb01::1:e803/128
 DNS = 10.64.0.1
 
 [Peer]
 PublicKey = ofyfRvMPB0PPIGGItNL+5tNdvTKXuWye5CfjPgPNvQ8=
 AllowedIPs = 0.0.0.0/0,::0/0
-Endpoint = 103.124.165.2:51820
+Endpoint = 198.51.100.2:51820
 `
 
 func TestParseConf(t *testing.T) {
@@ -47,10 +47,10 @@ func TestParseConf(t *testing.T) {
 	if got := len(slot.AllowedIPs); got != 2 {
 		t.Errorf("len(AllowedIPs) = %d, want 2", got)
 	}
-	if slot.Endpoint != "103.124.165.2:51820" {
+	if slot.Endpoint != "198.51.100.2:51820" {
 		t.Errorf("Endpoint = %q", slot.Endpoint)
 	}
-	if slot.EndpointHost() != "103.124.165.2" {
+	if slot.EndpointHost() != "198.51.100.2" {
 		t.Errorf("EndpointHost = %q", slot.EndpointHost())
 	}
 	if slot.MTU != DefaultMTU {
@@ -60,7 +60,7 @@ func TestParseConf(t *testing.T) {
 
 func TestParseConfDefaultsAllowedIPs(t *testing.T) {
 	conf := `[Interface]
-PrivateKey = QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=
+PrivateKey = R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=
 Address = 10.64.0.2/32
 
 [Peer]
@@ -94,7 +94,7 @@ func TestParseConfRejectsIncomplete(t *testing.T) {
 
 func TestParseConfIgnoresInlineComments(t *testing.T) {
 	conf := `[Interface]
-PrivateKey = QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=
+PrivateKey = R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=
 Address = 10.64.0.2/32
 MTU = 1380 # smaller for this provider
 

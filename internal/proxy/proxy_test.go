@@ -15,11 +15,11 @@ import (
 
 func TestCheckClient(t *testing.T) {
 	deps := &Deps{AllowedClients: []netip.Prefix{
-		netip.MustParsePrefix("10.10.10.0/24"),
+		netip.MustParsePrefix("10.0.0.0/24"),
 		netip.MustParsePrefix("::1/128"),
 	}}
 
-	allowed := []string{"10.10.10.7:5000", "[::1]:5000"}
+	allowed := []string{"10.0.0.7:5000", "[::1]:5000"}
 	for _, addr := range allowed {
 		if err := deps.checkClient(mustAddr(t, addr)); err != nil {
 			t.Errorf("checkClient(%s) = %v, want allowed", addr, err)

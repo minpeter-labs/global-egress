@@ -37,7 +37,7 @@ func testEntrySlots() []catalog.Slot {
 			ID:            e.id,
 			Country:       e.country,
 			City:          e.city,
-			PrivateKey:    "QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=",
+			PrivateKey:    "R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=",
 			PeerPublicKey: "ofyfRvMPB0PPIGGItNL+5tNdvTKXuWye5CfjPgPNvQ8=",
 			Addresses:     []netip.Addr{netip.MustParseAddr("10.73.84.67")},
 			Endpoint:      netip.AddrPortFrom(netip.MustParseAddr("198.51.100.9"), uint16(51820+i)).String(),

@@ -25,7 +25,7 @@ func newTestServer(t *testing.T, opts Options) (*Server, *pool.Pool) {
 			ID:            spec.id,
 			Country:       spec.country,
 			City:          spec.city,
-			PrivateKey:    "QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=",
+			PrivateKey:    "R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=",
 			PeerPublicKey: "ofyfRvMPB0PPIGGItNL+5tNdvTKXuWye5CfjPgPNvQ8=",
 			Addresses:     []netip.Addr{netip.MustParseAddr("10.64.0.2")},
 			Endpoint:      "198.51.100.1:51820",
@@ -53,7 +53,7 @@ func do(t *testing.T, server *Server, method, target, body string, headers map[s
 		reader = strings.NewReader(body)
 	}
 	req := httptest.NewRequest(method, target, reader)
-	req.RemoteAddr = "10.10.10.5:40000"
+	req.RemoteAddr = "10.0.0.5:40000"
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
@@ -200,7 +200,7 @@ func TestNormalizeTarget(t *testing.T) {
 
 func TestClientACL(t *testing.T) {
 	server, _ := newTestServer(t, Options{
-		AllowedClients: []netip.Prefix{netip.MustParsePrefix("10.10.10.0/24")},
+		AllowedClients: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)

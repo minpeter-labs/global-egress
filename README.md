@@ -10,8 +10,8 @@ API.
 
 ```text
 internal client
-      │  socks5://egress.minpeter.internal:1080
-      │  http://egress.minpeter.internal:3128
+      │  socks5://egress.example.internal:1080
+      │  http://egress.example.internal:3128
       ▼
 global-egress ── slot selection (country / session / unique / cooldown)
       │
@@ -88,14 +88,14 @@ global-egress serve -config /etc/global-egress/config.yaml
 
 ```sh
 # Any healthy slot.
-curl -x http://egress.minpeter.internal:3128 https://api.example.com/
+curl -x http://egress.example.internal:3128 https://api.example.com/
 
 # Environment variables, which is what most tools expect.
-export HTTP_PROXY=http://egress.minpeter.internal:3128
-export HTTPS_PROXY=http://egress.minpeter.internal:3128
+export HTTP_PROXY=http://egress.example.internal:3128
+export HTTPS_PROXY=http://egress.example.internal:3128
 
 # SOCKS5 works for anything TCP, not just HTTP.
-curl --socks5-hostname egress.minpeter.internal:1080 https://api.example.com/
+curl --socks5-hostname egress.example.internal:1080 https://api.example.com/
 ```
 
 ### Controlling the exit IP
@@ -104,10 +104,10 @@ The selection policy travels in the **proxy username**, which every HTTP and
 SOCKS5 client supports:
 
 ```sh
-curl -x http://egress.minpeter.internal:3128 --proxy-user 'cc=jp:x'          https://api.example.com/
-curl -x http://egress.minpeter.internal:3128 --proxy-user 'city=us-lax:x'     https://api.example.com/
-curl -x http://egress.minpeter.internal:3128 --proxy-user 'sess=job-1;ttl=600:x' https://api.example.com/
-curl -x http://egress.minpeter.internal:3128 --proxy-user 'uniq=batch-7:x'    https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'cc=jp:x'          https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'city=us-lax:x'     https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'sess=job-1;ttl=600:x' https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'uniq=batch-7:x'    https://api.example.com/
 ```
 
 | Directive | Meaning |
@@ -130,7 +130,7 @@ Every response reports the egress that served it:
 X-Egress-Slot: jp-tyo-wg-001
 X-Egress-Country: jp
 X-Egress-City: jp-tyo
-X-Egress-IP: 138.199.21.247
+X-Egress-IP: 203.0.113.7
 X-Egress-Session: job-1
 ```
 
@@ -140,7 +140,7 @@ Changing the session name is the simplest rotation. To also make the pool avoid
 that IP for that destination, report it:
 
 ```sh
-curl -X POST http://egress.minpeter.internal:8080/v1/report \
+curl -X POST http://egress.example.internal:8080/v1/report \
   -H 'Content-Type: application/json' \
   -d '{"session":"job-1","target":"api.example.com","reason":"http_403","cooldown":"30m"}'
 ```
@@ -154,7 +154,7 @@ The pool then:
 ```python
 import requests
 
-EGRESS = "egress.minpeter.internal"
+EGRESS = "egress.example.internal"
 API = f"http://{EGRESS}:8080"
 
 def proxies(session: str) -> dict:

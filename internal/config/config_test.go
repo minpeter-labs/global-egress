@@ -23,7 +23,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 catalog:
   path: wireguard
 listen:
-  socks5: 10.10.10.70:1080
+  socks5: 10.0.0.70:1080
 `)
 
 	cfg, err := Load(path)
@@ -129,7 +129,7 @@ func TestValidate(t *testing.T) {
 
 func TestAllowedClientPrefixes(t *testing.T) {
 	cfg := Default()
-	cfg.Access.AllowedClients = []string{"10.10.10.0/24", " ::1/128 "}
+	cfg.Access.AllowedClients = []string{"10.0.0.0/24", " ::1/128 "}
 	prefixes, err := cfg.AllowedClientPrefixes()
 	if err != nil {
 		t.Fatalf("AllowedClientPrefixes: %v", err)
@@ -137,7 +137,7 @@ func TestAllowedClientPrefixes(t *testing.T) {
 	if len(prefixes) != 2 {
 		t.Fatalf("len = %d, want 2", len(prefixes))
 	}
-	if prefixes[0].String() != "10.10.10.0/24" {
+	if prefixes[0].String() != "10.0.0.0/24" {
 		t.Errorf("prefix[0] = %s", prefixes[0])
 	}
 }

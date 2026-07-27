@@ -27,7 +27,7 @@ entries:
   # prefer.
   slots:
     - jp-tyo-wg-001
-    - sg-sin-wg-001
+    - nl-ams-wg-001
     - us-lax-wg-001
   # If slots is empty, pick this many automatically, spread across regions.
   auto: 2
@@ -40,14 +40,14 @@ catalog:
 listen:
   # Bind to the internal address clients reach the service on. Never expose
   # these ports to the internet.
-  socks5: 10.10.10.70:1080
-  http: 10.10.10.70:3128
-  control: 10.10.10.70:8080
+  socks5: 10.0.0.70:1080
+  http: 10.0.0.70:3128
+  control: 10.0.0.70:8080
 
 access:
   # Only these CIDRs may use the proxy and the control API.
   allowed_clients:
-    - 10.10.10.0/24
+    - 10.0.0.0/24
   # Optional shared password for proxy clients. The username always carries the
   # selection policy (cc=, sess=, uniq=, ...), never an identity.
   password: ""

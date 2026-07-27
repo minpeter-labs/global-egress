@@ -13,14 +13,14 @@ func TestDefaultDeniesInternalRanges(t *testing.T) {
 	}
 
 	denied := []string{
-		"10.10.10.1",      // RFC1918: the network this service is hosted on
+		"10.0.0.1",        // RFC1918: the network this service is hosted on
 		"192.168.0.120",   // RFC1918
 		"172.16.5.5",      // RFC1918
 		"127.0.0.1",       // loopback
 		"169.254.169.254", // cloud metadata
-		"100.119.184.70",  // CGNAT / Tailscale
+		"100.64.0.7",      // CGNAT / Tailscale
 		"::1",             // IPv6 loopback
-		"fd7a:115c:a1e0::1",
+		"fd00::1",
 	}
 	for _, raw := range denied {
 		addr := netip.MustParseAddr(raw)
@@ -29,7 +29,7 @@ func TestDefaultDeniesInternalRanges(t *testing.T) {
 		}
 	}
 
-	allowed := []string{"1.1.1.1", "146.70.199.219", "23.234.101.88", "2606:4700::1111"}
+	allowed := []string{"1.1.1.1", "203.0.113.9", "198.51.100.4", "2606:4700::1111"}
 	for _, raw := range allowed {
 		addr := netip.MustParseAddr(raw)
 		if err := guard.CheckAddr(addr); err != nil {
