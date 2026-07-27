@@ -34,9 +34,18 @@ CI runs these jobs in parallel:
 
 ## Supported Go versions
 
-The floor is **Go 1.25**, and it is not ours to choose: `golang.org/x/net` and
-`golang.org/x/crypto` both require it, so Go 1.24 cannot resolve the module graph at
-all. CI proves both ends of the range by running the suite on 1.25.x and on stable.
+The floor is **Go 1.25.12**, and both parts of that are forced:
+
+- the minor version by `golang.org/x/net` and `golang.org/x/crypto`, which require
+  1.25, so Go 1.24 cannot resolve the module graph at all
+- the patch version by `govulncheck`, which found ten reachable standard-library
+  vulnerabilities in 1.25.0 - in `crypto/tls`, `net/http`, `crypto/x509`,
+  `net/textproto`, `net/url` and `os` - the last of them fixed in 1.25.12
+
+The `vulncheck` job runs against the toolchain named in `go.mod` on purpose. The go
+directive is a promise about the oldest release users may build with, so raising the
+floor is the fix when a vulnerability is reachable there; testing only against
+`stable` would hide it.
 
 There are no external services in the unit tests: WireGuard and SOCKS behaviour is
 exercised against in-process fakes, and anything that would dial a provider is

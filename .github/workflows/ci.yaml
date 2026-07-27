@@ -140,5 +140,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Deliberately uses the toolchain declared in go.mod rather than the latest
+      # release. The go directive is a promise about the oldest version users may
+      # build with, so it is the version that has to be free of reachable
+      # vulnerabilities. Checking only "stable" would hide exactly that.
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
