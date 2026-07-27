@@ -67,26 +67,7 @@ func runServe(ctx context.Context, args []string) error {
 		logger.Warn("access.allowed_clients is empty: every host that can reach the listeners may use them")
 	}
 
-	egressPool, err := pool.NewWithSpecs(specs, entrySlots, pool.Options{
-		MaxActive:        cfg.Pool.MaxActive,
-		SessionTTL:       cfg.Pool.SessionTTL,
-		BatchTTL:         cfg.Pool.BatchTTL,
-		Cooldown:         cfg.Pool.Cooldown,
-		IdleTimeout:      cfg.Pool.IdleTimeout,
-		HandshakeTimeout: cfg.Pool.HandshakeTimeout,
-		DialAttempts:     cfg.Pool.DialAttempts,
-		FailureBackoff:   cfg.Pool.FailureBackoff,
-		NewTunnelBudget:  cfg.Pool.NewTunnelsPerWindow,
-		NewTunnelWindow:  cfg.Pool.NewTunnelWindow,
-		EntryExploreRate: cfg.Pool.EntryExploreRate,
-
-		DisableEntryExploration: cfg.Pool.StableEntryRouting,
-		IPCheckURL:              cfg.Pool.IPCheckURL,
-		IPCheckTimeout:          cfg.Pool.IPCheckTimeout,
-		IPRefreshInterval:       cfg.Pool.IPRefreshInterval,
-		IPCheckConcurrency:      cfg.Pool.IPCheckConcurrency,
-		Logger:                  logger,
-	})
+	egressPool, err := pool.NewWithSpecs(specs, entrySlots, poolOptionsFrom(cfg, logger))
 	if err != nil {
 		return err
 	}
@@ -300,4 +281,33 @@ func exitsFromRelays(relays []mullvad.Relay) []pool.ExitSpec {
 		})
 	}
 	return exits
+}
+
+// poolOptionsFrom maps configuration onto pool options.
+//
+// It exists as a named function so a test can compare both ends: a limit added to
+// the config and to the pool but forgotten here would silently disable itself
+// while every other test kept passing.
+func poolOptionsFrom(cfg config.Config, logger *slog.Logger) pool.Options {
+	return pool.Options{
+		MaxActive:               cfg.Pool.MaxActive,
+		MaxConnsPerExit:         cfg.Pool.MaxConnsPerExit,
+		MaxConcurrentConns:      cfg.Pool.MaxConcurrentConns,
+		SessionTTL:              cfg.Pool.SessionTTL,
+		BatchTTL:                cfg.Pool.BatchTTL,
+		Cooldown:                cfg.Pool.Cooldown,
+		IdleTimeout:             cfg.Pool.IdleTimeout,
+		HandshakeTimeout:        cfg.Pool.HandshakeTimeout,
+		DialAttempts:            cfg.Pool.DialAttempts,
+		FailureBackoff:          cfg.Pool.FailureBackoff,
+		NewTunnelBudget:         cfg.Pool.NewTunnelsPerWindow,
+		NewTunnelWindow:         cfg.Pool.NewTunnelWindow,
+		EntryExploreRate:        cfg.Pool.EntryExploreRate,
+		DisableEntryExploration: cfg.Pool.StableEntryRouting,
+		IPCheckURL:              cfg.Pool.IPCheckURL,
+		IPCheckTimeout:          cfg.Pool.IPCheckTimeout,
+		IPRefreshInterval:       cfg.Pool.IPRefreshInterval,
+		IPCheckConcurrency:      cfg.Pool.IPCheckConcurrency,
+		Logger:                  logger,
+	}
 }

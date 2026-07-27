@@ -49,6 +49,63 @@ listen:
 	}
 }
 
+// Defaults are easy to add a field for and forget to populate, and the symptom is
+// silent: a limit meant to protect the provider simply never applies. Assert the
+// safety-relevant ones explicitly.
+func TestDefaultsPopulateSafetyLimits(t *testing.T) {
+	t.Parallel()
+	cfg := Default()
+
+	cases := map[string]int{
+		"pool.max_active":             cfg.Pool.MaxActive,
+		"pool.max_conns_per_exit":     cfg.Pool.MaxConnsPerExit,
+		"pool.max_concurrent_conns":   cfg.Pool.MaxConcurrentConns,
+		"pool.new_tunnels_per_window": cfg.Pool.NewTunnelsPerWindow,
+		"pool.dial_attempts":          cfg.Pool.DialAttempts,
+	}
+	for name, value := range cases {
+		if value <= 0 {
+			t.Errorf("%s defaults to %d; a zero here disables the protection", name, value)
+		}
+	}
+	for name, value := range map[string]time.Duration{
+		"pool.new_tunnel_window": cfg.Pool.NewTunnelWindow,
+		"pool.cooldown":          cfg.Pool.Cooldown,
+		"pool.session_ttl":       cfg.Pool.SessionTTL,
+	} {
+		if value <= 0 {
+			t.Errorf("%s defaults to %s", name, value)
+		}
+	}
+	if cfg.Mode != ModeRelaySocks {
+		t.Errorf("Mode defaults to %q, want %q", cfg.Mode, ModeRelaySocks)
+	}
+}
+
+// A config that sets only a few pool fields must keep the rest of the defaults,
+// which is what makes the limits apply without every deployment restating them.
+func TestPartialPoolConfigKeepsDefaults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := write(t, dir, "config.yaml", `
+catalog:
+  path: /var/lib/global-egress/wireguard
+pool:
+  max_active: 25
+  preopen: 3
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Pool.MaxConnsPerExit != 8 {
+		t.Errorf("MaxConnsPerExit = %d, want the default 8", cfg.Pool.MaxConnsPerExit)
+	}
+	if cfg.Pool.MaxConcurrentConns != 256 {
+		t.Errorf("MaxConcurrentConns = %d, want the default 256", cfg.Pool.MaxConcurrentConns)
+	}
+}
+
 func TestLoadReadsSecretFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

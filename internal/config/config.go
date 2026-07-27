@@ -193,6 +193,8 @@ func Default() Config {
 		},
 		Pool: PoolConfig{
 			MaxActive:           25,
+			MaxConnsPerExit:     8,
+			MaxConcurrentConns:  256,
 			Preopen:             0,
 			SessionTTL:          10 * time.Minute,
 			BatchTTL:            15 * time.Minute,
