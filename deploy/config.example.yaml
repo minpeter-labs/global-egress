@@ -54,6 +54,11 @@ access:
   # password_file: /etc/global-egress/proxy-password
   # Reject proxy clients that present no credentials at all.
   require_auth: false
+  # Reject requests that carry no selection directives. The policy rides in the
+  # proxy username, and several clients drop the credentials when the password is
+  # empty, which turns "give me a Japanese exit" into "give me any exit" with no
+  # error. Turn this on where that would be a bug.
+  require_policy: false
   # Optional bearer token for the control API.
   control_token: ""
   # control_token_file: /etc/global-egress/control-token

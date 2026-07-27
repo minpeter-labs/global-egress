@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/minpeter-labs/global-egress/internal/policy"
 	"github.com/minpeter-labs/global-egress/internal/pool"
 )
 
@@ -196,5 +197,53 @@ func TestIPString(t *testing.T) {
 	lease.PublicIP = netip.MustParseAddr("203.0.113.4")
 	if got := ipString(lease); got != "203.0.113.4" {
 		t.Errorf("ipString = %q", got)
+	}
+}
+
+func TestRequirePolicyRejectsDirectivelessRequests(t *testing.T) {
+	// The directives ride in the proxy username. Clients that drop the credentials
+	// when the password is empty still get a working response from an arbitrary
+	// exit, which is indistinguishable from success. RequirePolicy makes that loud.
+	deps := &Deps{RequirePolicy: true}
+
+	if _, err := deps.authorize("", "", false); !errors.Is(err, errPolicyRequired) {
+		t.Errorf("no credentials: error = %v, want errPolicyRequired", err)
+	}
+	if _, err := deps.authorize("someaccount", "pw", true); !errors.Is(err, errPolicyRequired) {
+		t.Errorf("credentials without directives: error = %v, want errPolicyRequired", err)
+	}
+	if _, err := deps.authorize("cc=jp", "x", true); err != nil {
+		t.Errorf("a real policy was rejected: %v", err)
+	}
+}
+
+func TestRequirePolicyOffKeepsTheDefaultBehaviour(t *testing.T) {
+	deps := &Deps{}
+	pol, err := deps.authorize("", "", false)
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	if !pol.IsZero() {
+		t.Error("expected an unconstrained policy")
+	}
+}
+
+func TestEgressHeadersReportTheAppliedPolicy(t *testing.T) {
+	// A client cannot otherwise tell that its directives were dropped in transit.
+	lease := &pool.Lease{Slot: pool.Spec{ID: "jp-tyo-wg-socks5-001", Country: "jp", City: "jp-tyo"}}
+
+	pol, err := policy.Parse("cc=jp;sess=job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := egressHeaders(lease, pol)
+	if got := headers["X-Egress-Policy"]; got != "cc=jp;sess=job-1" {
+		t.Errorf("X-Egress-Policy = %q", got)
+	}
+
+	// And the empty case has to be visible too, not absent.
+	headers = egressHeaders(lease, policy.Policy{})
+	if got := headers["X-Egress-Policy"]; got != "(any)" {
+		t.Errorf("X-Egress-Policy for an empty policy = %q, want (any)", got)
 	}
 }

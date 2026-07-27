@@ -80,6 +80,14 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
 			return
 		}
+		if errors.Is(err, errPolicyRequired) {
+			w.Header().Set("Proxy-Authenticate", `Basic realm="global-egress"`)
+			http.Error(w, "no selection policy supplied: put the directives in the proxy "+
+				"username and give a non-empty password, e.g. \"cc=jp:x\". Several clients "+
+				"drop the credentials entirely when the password is empty.",
+				http.StatusProxyAuthRequired)
+			return
+		}
 		// A malformed policy is the client's mistake; say so precisely.
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -133,7 +141,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	// react to the IP they were given.
 	var header strings.Builder
 	header.WriteString("HTTP/1.1 200 Connection Established\r\n")
-	for key, value := range egressHeaders(lease) {
+	for key, value := range egressHeaders(lease, pol) {
 		fmt.Fprintf(&header, "%s: %s\r\n", key, value)
 	}
 	header.WriteString("\r\n")
@@ -248,7 +256,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 			w.Header().Add(key, value)
 		}
 	}
-	for key, value := range egressHeaders(lease) {
+	for key, value := range egressHeaders(lease, pol) {
 		w.Header().Set(key, value)
 	}
 	w.WriteHeader(resp.StatusCode)
@@ -264,10 +272,17 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		slog.Duration("duration", time.Since(started)))
 }
 
-// egressHeaders describe the chosen slot to the client.
-func egressHeaders(lease *pool.Lease) map[string]string {
+// egressHeaders describe the chosen slot, and the policy that chose it, to the
+// client.
+//
+// Reporting the policy back matters more than it looks: the directives ride in the
+// proxy username, and a client that drops the credentials still gets a perfectly
+// good response from an arbitrary exit. Echoing what the server actually parsed is
+// what turns that into something a caller can notice.
+func egressHeaders(lease *pool.Lease, pol policy.Policy) map[string]string {
 	headers := map[string]string{
-		"X-Egress-Slot": lease.Slot.ID,
+		"X-Egress-Slot":   lease.Slot.ID,
+		"X-Egress-Policy": pol.String(),
 	}
 	if lease.Slot.Country != "" {
 		headers["X-Egress-Country"] = lease.Slot.Country

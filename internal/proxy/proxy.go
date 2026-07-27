@@ -40,6 +40,13 @@ type Deps struct {
 	Password string
 	// RequireAuth rejects clients that present no credentials at all.
 	RequireAuth bool
+	// RequirePolicy rejects requests that carry no selection directives.
+	//
+	// The policy travels in the proxy username, and several clients drop the
+	// credentials entirely when the password is empty. The request then succeeds
+	// from an arbitrary exit, which looks exactly like success. Turning this on
+	// converts that silent mis-selection into a loud refusal.
+	RequirePolicy bool
 	// DialTimeout bounds establishing the upstream connection.
 	DialTimeout time.Duration
 	// DialAttempts is how many different slots one request may try before giving
@@ -64,6 +71,10 @@ func (d *Deps) applyDefaults() {
 // errUnauthorized signals a credential problem, which the two protocols report
 // differently.
 var errUnauthorized = errors.New("proxy: unauthorized")
+
+// errPolicyRequired signals that the request carried no selection directives while
+// the operator has asked for them to be mandatory.
+var errPolicyRequired = errors.New("proxy: no selection policy supplied")
 
 // checkClient enforces the client ACL.
 func (d *Deps) checkClient(remote net.Addr) error {
@@ -104,6 +115,9 @@ func (d *Deps) authorize(username, password string, hadCredentials bool) (policy
 	pol, err := policy.Parse(username)
 	if err != nil {
 		return policy.Policy{}, err
+	}
+	if d.RequirePolicy && pol.IsZero() {
+		return policy.Policy{}, errPolicyRequired
 	}
 	return pol, nil
 }
