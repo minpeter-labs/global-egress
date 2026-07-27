@@ -9,7 +9,7 @@ LOCAL_CONFIG ?= config.local.yaml
 GOBIN := $(shell go env GOPATH)/bin
 GOFILES := $(shell find cmd internal -name '*.go')
 
-.PHONY: all build build-static install test race vet fmt fmtcheck lint vulncheck tools tidy check run probe inspect relays clean
+.PHONY: all build build-static install test race vet fmt fmtcheck lint vulncheck tools tidy outdated check run probe inspect relays clean
 
 all: check build
 
@@ -55,6 +55,11 @@ tools:
 
 tidy:
 	go mod tidy
+
+# `go list -m -u all` walks gvisor's whole module graph (containerd, k8s, grpc)
+# and drowns the handful of modules we actually build against, so list only those.
+outdated:
+	@go list -m -u $$(go list -deps ./... | xargs go list -f '{{if .Module}}{{.Module.Path}}{{end}}' | sort -u | grep -vE '^$$|minpeter-labs') 2>/dev/null | grep '\[' || echo "all build dependencies are current"
 
 check: fmtcheck vet lint test
 

@@ -43,6 +43,21 @@ python3 scripts/verify.py
 it, which is the only reliable way to choose entries: the best entry depends on
 where the service is deployed, not on where the exits are.
 
+## Dependencies
+
+```sh
+make outdated    # only the modules this project actually builds against
+make vulncheck   # govulncheck
+```
+
+`go list -m -u all` is not useful here: gvisor drags in containerd, Kubernetes and
+gRPC through its module graph, and none of that is in the binary. `make outdated`
+lists the real set.
+
+`gvisor.dev/gvisor` is pinned by `wireguard-go` and should be left alone. Newer
+snapshots have a `pkg/tcpip/stack` directory declaring two different packages, so
+the build fails outright; there is a comment in `go.mod` saying so.
+
 ## Things to be careful about
 
 **Never commit a bundle, a `.conf`, or a key.** `.gitignore` covers `*.zip`,

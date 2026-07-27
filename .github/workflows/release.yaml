@@ -40,7 +40,7 @@ jobs:
           go build -trimpath -ldflags "-X main.version=${version} -s -w" -o "${name}" ./cmd/global-egress
           sha256sum "${name}" > "${name}.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: global-egress-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
