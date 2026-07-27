@@ -49,6 +49,12 @@ pool:
   dial_attempts: 3
   # Base backoff for a slot that failed; doubles per consecutive failure.
   failure_backoff: 30s
+  # Rate budget for *opening* tunnels. Providers restrict how quickly one device
+  # key may associate with new relays; exceeding that looks like key sharing and
+  # can get the key blocked for hours. Requests served from already-open tunnels
+  # are unaffected. 0 disables the limit.
+  new_tunnels_per_window: 120
+  new_tunnel_window: 10m
   # Bound on connecting to the destination through a tunnel.
   dial_timeout: 30s
   # Close relayed connections after this much inactivity.

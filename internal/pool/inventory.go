@@ -94,21 +94,27 @@ func (p *Pool) Slots(filter SlotFilter) []SlotInfo {
 
 // Stats summarises pool state.
 type Stats struct {
-	Slots        int    `json:"slots"`
-	Open         int    `json:"open_tunnels"`
-	Leased       int    `json:"active_leases"`
-	Disabled     int    `json:"disabled_slots"`
-	KnownIPs     int    `json:"slots_with_known_ip"`
-	UniqueIPs    int    `json:"unique_public_ips"`
-	Countries    int    `json:"countries"`
-	Cities       int    `json:"cities"`
-	Sessions     int    `json:"sticky_sessions"`
-	Batches      int    `json:"unique_batches"`
-	MaxActive    int    `json:"max_active"`
-	Acquisitions uint64 `json:"acquisitions"`
-	Rotations    uint64 `json:"rotations"`
-	Reports      uint64 `json:"reports"`
-	Failures     uint64 `json:"failures"`
+	Slots     int `json:"slots"`
+	Open      int `json:"open_tunnels"`
+	Leased    int `json:"active_leases"`
+	Disabled  int `json:"disabled_slots"`
+	KnownIPs  int `json:"slots_with_known_ip"`
+	UniqueIPs int `json:"unique_public_ips"`
+	Countries int `json:"countries"`
+	Cities    int `json:"cities"`
+	Sessions  int `json:"sticky_sessions"`
+	Batches   int `json:"unique_batches"`
+	MaxActive int `json:"max_active"`
+	// NewTunnelsUsed is how much of the new-tunnel rate budget has been spent in
+	// the current window, and NewTunnelBudget is the cap. Watching these tells
+	// you whether rotation requests are being slowed down to protect the key.
+	NewTunnelsUsed  int    `json:"new_tunnels_used"`
+	NewTunnelBudget int    `json:"new_tunnel_budget"`
+	NewTunnelWindow string `json:"new_tunnel_window"`
+	Acquisitions    uint64 `json:"acquisitions"`
+	Rotations       uint64 `json:"rotations"`
+	Reports         uint64 `json:"reports"`
+	Failures        uint64 `json:"failures"`
 }
 
 // Stats returns a snapshot of counters and derived inventory numbers.
@@ -117,15 +123,19 @@ func (p *Pool) Stats() Stats {
 	defer p.mu.Unlock()
 
 	now := time.Now()
+	p.pruneOpensLocked(now)
 	stats := Stats{
-		Slots:        len(p.slots),
-		Sessions:     len(p.sessions),
-		Batches:      len(p.batches),
-		MaxActive:    p.opts.MaxActive,
-		Acquisitions: p.statAcquired,
-		Rotations:    p.statRotated,
-		Reports:      p.statReports,
-		Failures:     p.statFailures,
+		Slots:           len(p.slots),
+		Sessions:        len(p.sessions),
+		Batches:         len(p.batches),
+		MaxActive:       p.opts.MaxActive,
+		NewTunnelsUsed:  len(p.opens),
+		NewTunnelBudget: p.opts.NewTunnelBudget,
+		NewTunnelWindow: p.opts.NewTunnelWindow.String(),
+		Acquisitions:    p.statAcquired,
+		Rotations:       p.statRotated,
+		Reports:         p.statReports,
+		Failures:        p.statFailures,
 	}
 	ips := make(map[netip.Addr]struct{})
 	countries := make(map[string]struct{})

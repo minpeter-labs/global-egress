@@ -84,6 +84,12 @@ type PoolConfig struct {
 	DialAttempts int `yaml:"dial_attempts"`
 	// FailureBackoff is the base backoff for a failing slot.
 	FailureBackoff time.Duration `yaml:"failure_backoff"`
+	// NewTunnelsPerWindow caps how many tunnels may be opened per
+	// NewTunnelWindow. Providers restrict how fast one key may associate with
+	// new relays, so this protects the key from being blocked. Zero disables it.
+	NewTunnelsPerWindow int `yaml:"new_tunnels_per_window"`
+	// NewTunnelWindow is the period NewTunnelsPerWindow applies to.
+	NewTunnelWindow time.Duration `yaml:"new_tunnel_window"`
 	// DialTimeout bounds connecting to the destination through a tunnel.
 	DialTimeout time.Duration `yaml:"dial_timeout"`
 	// RelayIdleTimeout closes relayed connections after inactivity.
@@ -127,21 +133,23 @@ func Default() Config {
 			AllowedClients: []string{"127.0.0.1/32", "::1/128"},
 		},
 		Pool: PoolConfig{
-			MaxActive:          25,
-			Preopen:            0,
-			SessionTTL:         10 * time.Minute,
-			BatchTTL:           15 * time.Minute,
-			Cooldown:           15 * time.Minute,
-			IdleTimeout:        10 * time.Minute,
-			HandshakeTimeout:   12 * time.Second,
-			DialAttempts:       3,
-			FailureBackoff:     30 * time.Second,
-			DialTimeout:        30 * time.Second,
-			RelayIdleTimeout:   5 * time.Minute,
-			IPCheckURL:         "https://am.i.mullvad.net/ip",
-			IPCheckTimeout:     15 * time.Second,
-			IPRefreshInterval:  6 * time.Hour,
-			IPCheckConcurrency: 4,
+			MaxActive:           25,
+			Preopen:             0,
+			SessionTTL:          10 * time.Minute,
+			BatchTTL:            15 * time.Minute,
+			Cooldown:            15 * time.Minute,
+			IdleTimeout:         10 * time.Minute,
+			HandshakeTimeout:    12 * time.Second,
+			DialAttempts:        3,
+			FailureBackoff:      30 * time.Second,
+			NewTunnelsPerWindow: 120,
+			NewTunnelWindow:     10 * time.Minute,
+			DialTimeout:         30 * time.Second,
+			RelayIdleTimeout:    5 * time.Minute,
+			IPCheckURL:          "https://am.i.mullvad.net/ip",
+			IPCheckTimeout:      15 * time.Second,
+			IPRefreshInterval:   6 * time.Hour,
+			IPCheckConcurrency:  4,
 		},
 		StateDir: "/var/lib/global-egress",
 		Log:      LogConfig{Level: "info", Format: "text"},
@@ -210,6 +218,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Pool.Preopen < 0 {
 		return fmt.Errorf("config: pool.preopen must not be negative")
+	}
+	if c.Pool.NewTunnelsPerWindow < 0 {
+		return fmt.Errorf("config: pool.new_tunnels_per_window must not be negative")
+	}
+	if c.Pool.NewTunnelWindow < 0 {
+		return fmt.Errorf("config: pool.new_tunnel_window must not be negative")
 	}
 	if c.Pool.MaxActive > 0 && c.Pool.Preopen > c.Pool.MaxActive {
 		return fmt.Errorf("config: pool.preopen (%d) exceeds pool.max_active (%d)",

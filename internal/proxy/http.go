@@ -342,7 +342,8 @@ func statusCodeFor(err error) int {
 	case errors.Is(err, pool.ErrNoCandidate):
 		// The request was understood but no egress matches the policy.
 		return http.StatusConflict
-	case errors.Is(err, pool.ErrCapacity):
+	case errors.Is(err, pool.ErrCapacity), errors.Is(err, pool.ErrTunnelBudget):
+		// Retryable: an existing tunnel will free up, or the rate window rolls.
 		return http.StatusServiceUnavailable
 	case errors.Is(err, pool.ErrExhausted):
 		return http.StatusBadGateway

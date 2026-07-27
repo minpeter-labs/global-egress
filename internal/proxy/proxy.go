@@ -140,7 +140,8 @@ func replyCodeFor(err error) byte {
 	switch {
 	case err == nil:
 		return repSuccess
-	case errors.Is(err, pool.ErrNoCandidate), errors.Is(err, pool.ErrCapacity):
+	case errors.Is(err, pool.ErrNoCandidate), errors.Is(err, pool.ErrCapacity),
+		errors.Is(err, pool.ErrTunnelBudget):
 		return repNotAllowed
 	case errors.Is(err, pool.ErrExhausted):
 		return repHostUnreachable

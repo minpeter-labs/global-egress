@@ -178,6 +178,14 @@ network namespace without policy routing tricks. Each slot instead gets its own
 [gVisor netstack](https://gvisor.dev/) network stack inside the process, which
 sidesteps the conflict entirely and needs no privileges.
 
+**Two budgets, not one.** `pool.max_active` caps how many tunnels are *up*;
+`pool.new_tunnels_per_window` caps how many may be *opened* per window. The second
+one matters because providers restrict how fast a single device key may associate
+with new relays — the failure mode is the key getting blocked for hours, not a
+slow request. Requests served from already-open tunnels never touch it, and
+`/v1/stats` exposes `new_tunnels_used` so you can see when rotation is being
+slowed down deliberately.
+
 **Lazy tunnels with a budget.** `pool.max_active` caps how many tunnels are up at
 once. Tunnels open on demand, idle ones are closed, and the least recently used
 one is evicted when the budget is full. Start low, measure, then raise it.

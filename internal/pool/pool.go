@@ -32,6 +32,9 @@ var (
 	ErrExhausted = errors.New("pool: all candidate slots failed")
 	// ErrCapacity means the active-tunnel budget is fully used by live requests.
 	ErrCapacity = errors.New("pool: tunnel capacity exhausted")
+	// ErrTunnelBudget means the new-tunnel rate budget is spent. Serving from an
+	// already-open tunnel is still possible; only opening another one is not.
+	ErrTunnelBudget = errors.New("pool: new-tunnel rate budget exhausted")
 )
 
 // Options configures a Pool.
@@ -53,6 +56,16 @@ type Options struct {
 	DialAttempts int
 	// FailureBackoff is the base backoff applied to a slot after a failure.
 	FailureBackoff time.Duration
+	// NewTunnelBudget caps how many tunnels may be *opened* per
+	// NewTunnelWindow. Zero disables the limit.
+	//
+	// This exists because providers restrict how quickly one device key may
+	// associate with new relays. Exceeding that looks like key sharing and can
+	// get the key blocked for hours, which is far worse than a slow rotation.
+	// The cap counts attempts, since a failed handshake still contacts a relay.
+	NewTunnelBudget int
+	// NewTunnelWindow is the period NewTunnelBudget applies to.
+	NewTunnelWindow time.Duration
 	// IPCheckURL returns the caller's public address. Empty disables IP checks,
 	// which also disables unique-IP guarantees.
 	IPCheckURL string
@@ -87,6 +100,9 @@ func (o *Options) applyDefaults() {
 	}
 	if o.FailureBackoff <= 0 {
 		o.FailureBackoff = 30 * time.Second
+	}
+	if o.NewTunnelWindow <= 0 {
+		o.NewTunnelWindow = 10 * time.Minute
 	}
 	if o.IPCheckTimeout <= 0 {
 		o.IPCheckTimeout = 15 * time.Second
@@ -159,6 +175,9 @@ type Pool struct {
 	order    []string // slot IDs in stable (sorted) order
 	sessions map[string]*session
 	batches  map[string]*batch
+	// opens holds the timestamps of recent tunnel openings, newest last, pruned
+	// to NewTunnelWindow.
+	opens []time.Time
 
 	// counters, protected by mu
 	statAcquired uint64
@@ -341,7 +360,11 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 		return open[p.rng.Intn(len(open))], false, nil
 	}
 
-	// Nothing open matches, so we must open one. Respect the active budget.
+	// Nothing open matches, so we must open one. Respect both budgets: how many
+	// tunnels may be up, and how fast new ones may be created.
+	if !p.tunnelBudgetAvailableLocked(now) {
+		return nil, false, ErrTunnelBudget
+	}
 	if err := p.reserveCapacityLocked(); err != nil {
 		return nil, false, err
 	}
@@ -482,7 +505,42 @@ func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunn
 	}
 }
 
+// tunnelBudgetAvailableLocked reports whether another tunnel may be opened now.
+func (p *Pool) tunnelBudgetAvailableLocked(now time.Time) bool {
+	if p.opts.NewTunnelBudget <= 0 {
+		return true
+	}
+	p.pruneOpensLocked(now)
+	return len(p.opens) < p.opts.NewTunnelBudget
+}
+
+func (p *Pool) pruneOpensLocked(now time.Time) {
+	cutoff := now.Add(-p.opts.NewTunnelWindow)
+	keep := 0
+	for _, at := range p.opens {
+		if at.After(cutoff) {
+			break
+		}
+		keep++
+	}
+	if keep > 0 {
+		p.opens = append(p.opens[:0], p.opens[keep:]...)
+	}
+}
+
+// noteTunnelOpen records one relay contact against the rate budget.
+func (p *Pool) noteTunnelOpen(now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pruneOpensLocked(now)
+	p.opens = append(p.opens, now)
+}
+
 func (p *Pool) openTunnel(ctx context.Context, spec catalog.Slot) (*wgtunnel.Tunnel, error) {
+	// Count the attempt before making it: a failed handshake still contacts the
+	// relay, and that is what the provider's limit reacts to.
+	p.noteTunnelOpen(time.Now())
+
 	openCtx, cancel := context.WithTimeout(ctx, p.opts.HandshakeTimeout)
 	defer cancel()
 
@@ -713,6 +771,16 @@ func (p *Pool) Warmup(ctx context.Context, count int) int {
 
 	p.mu.Lock()
 	now := time.Now()
+	if p.opts.NewTunnelBudget > 0 {
+		p.pruneOpensLocked(now)
+		if remaining := p.opts.NewTunnelBudget - len(p.opens); remaining < count {
+			count = remaining
+		}
+	}
+	if count <= 0 {
+		p.mu.Unlock()
+		return 0
+	}
 	var targets []*slotState
 	for _, id := range p.order {
 		state := p.slots[id]

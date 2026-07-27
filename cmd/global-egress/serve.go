@@ -70,6 +70,8 @@ func runServe(ctx context.Context, args []string) error {
 		HandshakeTimeout:   cfg.Pool.HandshakeTimeout,
 		DialAttempts:       cfg.Pool.DialAttempts,
 		FailureBackoff:     cfg.Pool.FailureBackoff,
+		NewTunnelBudget:    cfg.Pool.NewTunnelsPerWindow,
+		NewTunnelWindow:    cfg.Pool.NewTunnelWindow,
 		IPCheckURL:         cfg.Pool.IPCheckURL,
 		IPCheckTimeout:     cfg.Pool.IPCheckTimeout,
 		IPRefreshInterval:  cfg.Pool.IPRefreshInterval,
