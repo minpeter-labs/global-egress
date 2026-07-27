@@ -3,7 +3,58 @@
 Measured on 2026-07-28 with a 532-slot Mullvad bundle, Go 1.26, Linux, one
 `global-egress` process.
 
-## Memory
+## relay-socks mode, measured
+
+The default mode keeps a few entry tunnels up and exits through the SOCKS proxy on
+each relay.
+
+```text
+exits available            532   (relays that are active and expose a proxy)
+entry tunnels              3     (Tokyo, Singapore, Los Angeles)
+WireGuard associations     3     total, long-lived
+startup                    304ms to bring all three entries up
+resident memory            20.4 MiB for the whole 532-exit catalog
+```
+
+Rotation throughput, each request landing on a different exit IP:
+
+```text
+concurrency  8: 20/20 distinct IPs, 6.4s ->  3.1 IPs/s
+concurrency 20: 60/60 distinct IPs, 7.5s ->  8.0 IPs/s
+concurrency 40: 60/60 distinct IPs, 4.2s -> 14.3 IPs/s
+```
+
+At concurrency 40 the entire 532-exit catalog can be cycled in roughly 37
+seconds, with zero errors and no new key associations. Country selection was
+correct for every country tested (jp, de, us, br, au, se, za), and sticky sessions
+returned the same address on every request.
+
+Added latency versus exiting directly from the entry tunnel, Singapore entry to a
+German exit:
+
+```text
+direct  connect=0.365s  total=0.920s
+socks   connect=0.340s  total=1.396s
+```
+
+So roughly +0.5s per new connection on a long path, and much less when entry and
+exit are near each other. Existing connections are unaffected.
+
+Entry routing is learned from real traffic. After a few dozen requests from a
+Korean host:
+
+```text
+jp-tyo-wg-001   east-asia       jp=847ms  sg=839ms  hk=954ms  au=1117ms
+us-lax-wg-001   north-america   us=1111ms ca=1089ms gb=1280ms se=1267ms
+sg-sin-wg-001   south-asia      my=1286ms th=1584ms de=1719ms
+```
+
+The Asian entry won Asian exits and the American entry won American and European
+ones, without any of that being configured.
+
+## wireguard mode
+
+### Memory
 
 | State | RSS |
 |---|---:|

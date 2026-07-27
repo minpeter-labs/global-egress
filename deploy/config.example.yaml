@@ -3,6 +3,35 @@
 # Copy to /etc/global-egress/config.yaml and adjust. Every value shown here is
 # the built-in default unless noted otherwise.
 
+# How exit addresses are obtained.
+#
+#   relay-socks  Keep a few entry tunnels up and exit through the SOCKS proxy on
+#                each provider relay. Hundreds of addresses, rotation costs one
+#                TCP connection, and almost no key associations. Recommended.
+#   wireguard    Give every slot its own tunnel. Self-contained, but each slot
+#                costs a key association, and providers rate-limit those.
+mode: relay-socks
+
+relays:
+  # Provider relay list, used in relay-socks mode.
+  url: https://api.mullvad.net/www/relays/wireguard/
+  # Cached copy so a restart works without network. Relative to state_dir.
+  cache: relays.json
+  refresh: 24h
+
+entries:
+  # The tunnels every relay-socks request travels through. List them explicitly:
+  # the best entry depends on where this service runs, which the catalog cannot
+  # know. Two or three in different regions gives failover and better routing;
+  # the pool measures real latency per exit country and learns which entry to
+  # prefer.
+  slots:
+    - jp-tyo-wg-001
+    - sg-sin-wg-001
+    - us-lax-wg-001
+  # If slots is empty, pick this many automatically, spread across regions.
+  auto: 2
+
 catalog:
   # Directory of .conf files (written by "global-egress import") or a provider
   # .zip. The files contain a private key, so keep the directory at mode 0700.

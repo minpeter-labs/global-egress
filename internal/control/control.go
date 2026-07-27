@@ -55,6 +55,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/info", s.handleInfo)
 	s.mux.HandleFunc("GET /v1/stats", s.handleStats)
 	s.mux.HandleFunc("GET /v1/slots", s.handleSlots)
+	s.mux.HandleFunc("GET /v1/entries", s.handleEntries)
 	s.mux.HandleFunc("GET /v1/ips", s.handleIPs)
 	s.mux.HandleFunc("GET /v1/whoami", s.handleWhoami)
 	s.mux.HandleFunc("GET /v1/sessions/{name}", s.handleSession)
@@ -145,6 +146,13 @@ func (s *Server) handleSlots(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"count": len(slots), "slots": slots})
+}
+
+// handleEntries reports the shared entry tunnels and the latency measured through
+// them, which is what decides regional routing.
+func (s *Server) handleEntries(w http.ResponseWriter, _ *http.Request) {
+	entries := s.opts.Pool.Entries()
+	writeJSON(w, http.StatusOK, map[string]any{"count": len(entries), "entries": entries})
 }
 
 func (s *Server) handleIPs(w http.ResponseWriter, _ *http.Request) {

@@ -1,0 +1,289 @@
+package pool
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"math/rand"
+	"net/netip"
+	"testing"
+	"time"
+
+	"github.com/minpeter-labs/global-egress/internal/catalog"
+	"github.com/minpeter-labs/global-egress/internal/policy"
+	"github.com/minpeter-labs/global-egress/internal/relaylist"
+)
+
+func testRelays() []relaylist.Relay {
+	return []relaylist.Relay{
+		{Hostname: "jp-tyo-wg-001", Country: "jp", CityCode: "tyo", Active: true,
+			SocksName: "jp-tyo-wg-socks5-001.relays.example", SocksPort: 1080},
+		{Hostname: "de-fra-wg-001", Country: "de", CityCode: "fra", Active: true,
+			SocksName: "de-fra-wg-socks5-001.relays.example", SocksPort: 1080},
+		{Hostname: "us-lax-wg-001", Country: "us", CityCode: "lax", Active: true,
+			SocksName: "us-lax-wg-socks5-001.relays.example", SocksPort: 1080},
+	}
+}
+
+func testEntrySlots() []catalog.Slot {
+	entries := []struct{ id, country, city string }{
+		{"jp-tyo-wg-001", "jp", "jp-tyo"},
+		{"us-lax-wg-001", "us", "us-lax"},
+	}
+	out := make([]catalog.Slot, 0, len(entries))
+	for i, e := range entries {
+		out = append(out, catalog.Slot{
+			ID:            e.id,
+			Country:       e.country,
+			City:          e.city,
+			PrivateKey:    "QFX/E0iiUJ0PLZ+5tNdvTKXuWye5CfjPgPNvQ8kZWlo=",
+			PeerPublicKey: "ofyfRvMPB0PPIGGItNL+5tNdvTKXuWye5CfjPgPNvQ8=",
+			Addresses:     []netip.Addr{netip.MustParseAddr("10.73.84.67")},
+			Endpoint:      netip.AddrPortFrom(netip.MustParseAddr("198.51.100.9"), uint16(51820+i)).String(),
+			MTU:           catalog.DefaultMTU,
+		})
+	}
+	return out
+}
+
+func newRelayPool(t *testing.T, opts Options) *Pool {
+	t.Helper()
+	if opts.Logger == nil {
+		opts.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if opts.Rand == nil {
+		opts.Rand = rand.New(rand.NewSource(2))
+	}
+	// Disable exploration so entry ordering is deterministic in tests.
+	opts.EntryExploreRate = -1
+	p, err := NewWithSpecs(SpecsFromRelays(testRelays()), testEntrySlots(), opts)
+	if err != nil {
+		t.Fatalf("NewWithSpecs: %v", err)
+	}
+	t.Cleanup(p.Close)
+	return p
+}
+
+func TestSpecsFromRelays(t *testing.T) {
+	specs := SpecsFromRelays(testRelays())
+	if len(specs) != 3 {
+		t.Fatalf("len(specs) = %d, want 3", len(specs))
+	}
+	for _, spec := range specs {
+		if spec.Kind != KindRelaySocks {
+			t.Errorf("%s has kind %v, want relay-socks", spec.ID, spec.Kind)
+		}
+		if spec.SocksAddr == "" || spec.Target() != spec.SocksAddr {
+			t.Errorf("%s has no proxy address", spec.ID)
+		}
+	}
+	// IDs come from the SOCKS name, not the WireGuard hostname, so a relay's
+	// proxy slot can never collide with a WireGuard slot for the same relay.
+	if specs[0].ID != "jp-tyo-wg-socks5-001" {
+		t.Errorf("specs[0].ID = %q, want it derived from the SOCKS name", specs[0].ID)
+	}
+	if specs[0].City != "jp-tyo" {
+		t.Errorf("specs[0].City = %q, want jp-tyo", specs[0].City)
+	}
+}
+
+func TestRelaySlotsRequireAnEntry(t *testing.T) {
+	_, err := NewWithSpecs(SpecsFromRelays(testRelays()), nil, Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err == nil {
+		t.Fatal("relay-socks slots without an entry tunnel should be rejected")
+	}
+}
+
+func TestWireGuardSlotsNeedNoEntry(t *testing.T) {
+	bundle := testBundle(t)
+	if _, err := NewWithSpecs(SpecsFromBundle(bundle), nil, Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}); err != nil {
+		t.Fatalf("WireGuard-only pool should not need entries: %v", err)
+	}
+}
+
+func TestNewWithSpecsRejectsDuplicates(t *testing.T) {
+	specs := SpecsFromRelays(testRelays())
+	specs = append(specs, specs[0])
+	if _, err := NewWithSpecs(specs, testEntrySlots(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}); err == nil {
+		t.Fatal("duplicate slot IDs should be rejected")
+	}
+}
+
+func TestSlotsReportKindAndTarget(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	slots := p.Slots(SlotFilter{Country: "jp"})
+	if len(slots) != 1 {
+		t.Fatalf("got %d jp slots, want 1", len(slots))
+	}
+	if slots[0].Kind != "relay-socks" {
+		t.Errorf("Kind = %q", slots[0].Kind)
+	}
+	if slots[0].Target == "" {
+		t.Error("Target should carry the proxy address")
+	}
+}
+
+func TestEntryOrderingUsesGeographicPrior(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	now := time.Now()
+
+	p.mu.Lock()
+	forJP := p.orderedEntriesLocked("jp", now)
+	forUS := p.orderedEntriesLocked("us", now)
+	p.mu.Unlock()
+
+	if forJP[0].spec.ID != "jp-tyo-wg-001" {
+		t.Errorf("a Japanese exit should prefer the Japanese entry, got %s", forJP[0].spec.ID)
+	}
+	if forUS[0].spec.ID != "us-lax-wg-001" {
+		t.Errorf("an American exit should prefer the American entry, got %s", forUS[0].spec.ID)
+	}
+}
+
+func TestMeasuredLatencyBeatsPrior(t *testing.T) {
+	p := newRelayPool(t, Options{})
+
+	var jp, us *entryState
+	p.mu.Lock()
+	for _, entry := range p.entries {
+		switch entry.spec.ID {
+		case "jp-tyo-wg-001":
+			jp = entry
+		case "us-lax-wg-001":
+			us = entry
+		}
+	}
+	p.mu.Unlock()
+
+	// The prior favours the Japanese entry for a Japanese exit. Real traffic that
+	// says otherwise must win: this is what makes routing self-correcting.
+	p.recordEntryLatency(jp, "jp", 900*time.Millisecond)
+	p.recordEntryLatency(us, "jp", 120*time.Millisecond)
+
+	p.mu.Lock()
+	ordered := p.orderedEntriesLocked("jp", time.Now())
+	p.mu.Unlock()
+
+	if ordered[0].spec.ID != "us-lax-wg-001" {
+		t.Errorf("measured latency ignored: first entry is %s", ordered[0].spec.ID)
+	}
+}
+
+func TestRecordEntryLatencySmoothsSamples(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	p.mu.Lock()
+	entry := p.entries[0]
+	p.mu.Unlock()
+
+	p.recordEntryLatency(entry, "jp", 100*time.Millisecond)
+	p.recordEntryLatency(entry, "jp", 1000*time.Millisecond)
+
+	p.mu.Lock()
+	got := entry.latency["jp"]
+	samples := entry.samples["jp"]
+	p.mu.Unlock()
+
+	// One slow sample must move the average without dominating it.
+	if got <= 100*time.Millisecond || got >= 1000*time.Millisecond {
+		t.Errorf("smoothed latency = %s, want it between the two samples", got)
+	}
+	if samples != 2 {
+		t.Errorf("samples = %d, want 2", samples)
+	}
+
+	// Ignore nonsense rather than poisoning the average.
+	p.recordEntryLatency(entry, "", time.Second)
+	p.recordEntryLatency(entry, "jp", 0)
+	p.mu.Lock()
+	unchanged := entry.latency["jp"] == got && entry.samples["jp"] == 2
+	p.mu.Unlock()
+	if !unchanged {
+		t.Error("invalid samples should be ignored")
+	}
+}
+
+func TestDisabledEntriesAreSkipped(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	p.mu.Lock()
+	p.entries[0].disabledUntil = time.Now().Add(time.Minute)
+	remaining := len(p.orderedEntriesLocked("jp", time.Now()))
+	p.mu.Unlock()
+	if remaining != 1 {
+		t.Errorf("ordered entries = %d, want 1 after disabling one", remaining)
+	}
+}
+
+func TestEntriesSnapshot(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	p.recordEntryLatency(entryByID(t, p, "jp-tyo-wg-001"), "jp", 200*time.Millisecond)
+
+	infos := p.Entries()
+	if len(infos) != 2 {
+		t.Fatalf("Entries() = %d, want 2", len(infos))
+	}
+	if infos[0].ID != "jp-tyo-wg-001" {
+		t.Errorf("entries are not sorted: %q first", infos[0].ID)
+	}
+	if infos[0].Region != "east-asia" {
+		t.Errorf("Region = %q", infos[0].Region)
+	}
+	if infos[0].Latency["jp"] != 200 {
+		t.Errorf("Latency = %v, want jp=200ms", infos[0].Latency)
+	}
+	if infos[0].Open {
+		t.Error("no entry should be reported open in this test")
+	}
+}
+
+func entryByID(t *testing.T, p *Pool, id string) *entryState {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, entry := range p.entries {
+		if entry.spec.ID == id {
+			return entry
+		}
+	}
+	t.Fatalf("entry %q not found", id)
+	return nil
+}
+
+func TestAcquireRelaySlotFailsWithoutReachableEntry(t *testing.T) {
+	// The test entries point at unroutable endpoints, so acquiring must fail
+	// rather than hang: every entry is tried and reported as exhausted.
+	p := newRelayPool(t, Options{
+		HandshakeTimeout: 300 * time.Millisecond,
+		DialAttempts:     1,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := p.Acquire(ctx, policy.Policy{Countries: []string{"jp"}}, "example.com")
+	if err == nil {
+		t.Fatal("expected an error when no entry can be established")
+	}
+	if !errors.Is(err, ErrExhausted) {
+		t.Errorf("error = %v, want it to wrap ErrExhausted", err)
+	}
+}
+
+func TestStatsReportsEntries(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	stats := p.Stats()
+	if stats.Entries != 2 {
+		t.Errorf("Entries = %d, want 2", stats.Entries)
+	}
+	if stats.EntriesOpen != 0 {
+		t.Errorf("EntriesOpen = %d, want 0", stats.EntriesOpen)
+	}
+	if stats.Slots != 3 {
+		t.Errorf("Slots = %d, want 3", stats.Slots)
+	}
+}

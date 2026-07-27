@@ -2,11 +2,11 @@
 
 Give it a WireGuard configuration bundle, get a rotating egress proxy.
 
-`global-egress` reads a provider bundle such as Mullvad's "all servers" zip,
-keeps many of those tunnels up **simultaneously** in userspace, and exposes them
-as one proxy endpoint. Clients pick a country, pin a sticky session, demand a
-unique IP per request, or report a blocked IP and get rotated — all through the
-proxy username or a small control API.
+`global-egress` reads a provider bundle such as Mullvad's "all servers" zip and
+exposes hundreds of exit addresses behind one internal proxy endpoint. Clients
+pick a country, pin a sticky session, demand a unique IP per request, or report a
+blocked IP and get rotated — all through the proxy username or a small control
+API.
 
 ```text
 internal client
@@ -15,17 +15,36 @@ internal client
       ▼
 global-egress ── slot selection (country / session / unique / cooldown)
       │
-      ├─ userspace WireGuard tunnel → provider server in Tokyo
-      ├─ userspace WireGuard tunnel → provider server in Frankfurt
-      ├─ userspace WireGuard tunnel → provider server in Los Angeles
-      └─ ... up to hundreds of slots
-                    │
-                    ▼
-                 internet
+      ├─ entry tunnel (Tokyo) ─┐
+      ├─ entry tunnel (Singapore) ─┼─→ SOCKS proxy on any of ~530 relays
+      └─ entry tunnel (Los Angeles) ─┘        │
+                                              ▼
+                                          internet
 ```
 
 Everything runs in one process. No `wg-quick`, no network namespaces, no
 `/dev/net/tun`, no changes to host routing, no root required.
+
+## Two modes, and why the default is what it is
+
+| | `relay-socks` (default) | `wireguard` |
+|---|---|---|
+| A slot is | a relay's SOCKS proxy, reached through an entry tunnel | its own userspace WireGuard tunnel |
+| Exit addresses | ~530, one per relay | one per tunnel |
+| Cost of rotating | one TCP connection | one WireGuard handshake |
+| Key associations | 2-3 total, long-lived | one per slot |
+| Memory for the whole catalog | ~20 MiB | ~850 MiB |
+
+Providers restrict how quickly one device key may associate with new relays.
+Measured on a 532-relay bundle: sweeping the catalog as WireGuard tunnels tripped
+that limit after 219 relays in under three minutes and the key stopped
+handshaking anywhere for hours. `relay-socks` moves rotation off that path
+entirely — the key stays on two or three relays, and exits change by opening a
+TCP connection to another relay's proxy from inside the tunnel. See
+[docs/capacity.md](docs/capacity.md) for the numbers.
+
+`wireguard` mode remains available: it needs no relay list and its exit addresses
+are a different set, which is useful if a provider ever stops offering proxies.
 
 ## Why not an existing tool
 
@@ -50,14 +69,17 @@ global-egress import -zip ~/mullvad-all.zip -dir /var/lib/global-egress/wireguar
 # 2. See what the bundle contains, without connecting anywhere.
 global-egress inspect -catalog /var/lib/global-egress/wireguard
 
-# 3. Measure how many *distinct* exit IPs the bundle really provides.
-#    Pace it: providers rate-limit handshakes per device key, and an unpaced
-#    sweep of a large bundle starts failing part-way through.
+# 3. See the relay list that relay-socks mode exits through.
+global-egress relays -cache /var/lib/global-egress/relays.json
+
+# 4. Optional: measure the exit IP of each slot and store an inventory.
+#    In wireguard mode, pace it (-interval): providers rate-limit handshakes per
+#    device key, and an unpaced sweep starts failing part-way through.
 global-egress probe -catalog /var/lib/global-egress/wireguard \
   -state /var/lib/global-egress/inventory.json \
   -concurrency 2 -interval 2s
 
-# 4. Run the service.
+# 5. Run the service.
 cp deploy/config.example.yaml /etc/global-egress/config.yaml
 global-egress serve -config /etc/global-egress/config.yaml
 ```
@@ -163,6 +185,7 @@ Bound to an internal address, optionally protected by a bearer token.
 | `GET /v1/info` | Version, uptime, slot count |
 | `GET /v1/stats` | Open tunnels, unique IPs, sessions, counters |
 | `GET /v1/slots` | Inventory; filters: `country`, `city`, `open`, `with_ip`, `limit` |
+| `GET /v1/entries` | Entry tunnels and the latency measured through them |
 | `GET /v1/ips` | Distinct measured public IPs |
 | `GET /v1/whoami?sess=NAME` | Which slot and IP a session currently uses |
 | `GET /v1/sessions/NAME` | Same as `whoami`, path form |
@@ -173,10 +196,17 @@ Bound to an internal address, optionally protected by a bearer token.
 ## Design notes
 
 **Userspace tunnels.** Every configuration in a provider bundle claims the same
-tunnel address and a default route, so hundreds of them cannot coexist in one
-network namespace without policy routing tricks. Each slot instead gets its own
+tunnel address and a default route, so several of them cannot coexist in one
+network namespace without policy routing tricks. Each tunnel instead gets its own
 [gVisor netstack](https://gvisor.dev/) network stack inside the process, which
 sidesteps the conflict entirely and needs no privileges.
+
+**Entries are chosen per exit, and the choice is learned.** Every request pays the
+trip to its entry tunnel, so the entry matters as much as the exit. A coarse
+geographic prior orders entries at startup, then each successful dial feeds a
+latency average per (entry, exit country) and measurements override the prior. A
+small fraction of requests deliberately try the runner-up so alternatives keep
+being measured. `GET /v1/entries` shows what has been learned.
 
 **Two budgets, not one.** `pool.max_active` caps how many tunnels are *up*;
 `pool.new_tunnels_per_window` caps how many may be *opened* per window. The second
@@ -241,5 +271,8 @@ Reference implementations that informed the design are collected separately in
   only for slots whose IP has been measured.
 - Measuring a whole large bundle takes hours, because handshakes must be paced to
   stay under the provider's per-key rate limit.
+- In `relay-socks` mode the destination is resolved at the exit relay, so a host
+  name that resolves into private space cannot be caught locally. Literal private
+  addresses are still refused before dialling.
 - Not an anonymity tool. The provider still sees the tunnel, and the service logs
   which slot served which destination.

@@ -66,6 +66,10 @@ type Options struct {
 	NewTunnelBudget int
 	// NewTunnelWindow is the period NewTunnelBudget applies to.
 	NewTunnelWindow time.Duration
+	// EntryExploreRate is the probability of trying the second-best entry
+	// instead of the best one, so alternatives keep being measured. Zero means
+	// always use the best known entry.
+	EntryExploreRate float64
 	// IPCheckURL returns the caller's public address. Empty disables IP checks,
 	// which also disables unique-IP guarantees.
 	IPCheckURL string
@@ -104,6 +108,9 @@ func (o *Options) applyDefaults() {
 	if o.NewTunnelWindow <= 0 {
 		o.NewTunnelWindow = 10 * time.Minute
 	}
+	if o.EntryExploreRate <= 0 {
+		o.EntryExploreRate = 0.1
+	}
 	if o.IPCheckTimeout <= 0 {
 		o.IPCheckTimeout = 15 * time.Second
 	}
@@ -120,7 +127,7 @@ func (o *Options) applyDefaults() {
 
 // slotState is the mutable bookkeeping for one slot.
 type slotState struct {
-	spec catalog.Slot
+	spec Spec
 
 	tunnel  *wgtunnel.Tunnel
 	opening chan struct{} // non-nil while an Open is in flight
@@ -175,6 +182,9 @@ type Pool struct {
 	order    []string // slot IDs in stable (sorted) order
 	sessions map[string]*session
 	batches  map[string]*batch
+	// entries are the WireGuard tunnels that relay-socks slots ride on. Empty in
+	// pure WireGuard mode.
+	entries []*entryState
 	// opens holds the timestamps of recent tunnel openings, newest last, pruned
 	// to NewTunnelWindow.
 	opens []time.Time
@@ -186,10 +196,31 @@ type Pool struct {
 	statFailures uint64
 }
 
-// New builds a pool over the bundle's slots. No tunnel is opened yet.
+// New builds a pool where every slot owns a WireGuard tunnel.
 func New(bundle *catalog.Bundle, opts Options) (*Pool, error) {
 	if bundle == nil || len(bundle.Slots) == 0 {
 		return nil, errors.New("pool: bundle contains no slots")
+	}
+	return NewWithSpecs(SpecsFromBundle(bundle), nil, opts)
+}
+
+// NewWithSpecs builds a pool from explicit slot specifications.
+//
+// entries are the WireGuard tunnels that relay-socks slots are reached through.
+// They are required if any spec is KindRelaySocks and ignored otherwise.
+func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, error) {
+	if len(specs) == 0 {
+		return nil, errors.New("pool: no slots")
+	}
+	needsEntry := false
+	for _, spec := range specs {
+		if spec.Kind == KindRelaySocks {
+			needsEntry = true
+			break
+		}
+	}
+	if needsEntry && len(entries) == 0 {
+		return nil, errors.New("pool: relay-socks slots require at least one entry tunnel")
 	}
 	opts.applyDefaults()
 
@@ -203,15 +234,26 @@ func New(bundle *catalog.Bundle, opts Options) (*Pool, error) {
 		log:        opts.Logger,
 		ipCheckSem: make(chan struct{}, opts.IPCheckConcurrency),
 		rng:        rng,
-		slots:      make(map[string]*slotState, len(bundle.Slots)),
+		slots:      make(map[string]*slotState, len(specs)),
 		sessions:   make(map[string]*session),
 		batches:    make(map[string]*batch),
 	}
-	for _, spec := range bundle.Slots {
+	for _, spec := range specs {
+		if _, dup := p.slots[spec.ID]; dup {
+			return nil, fmt.Errorf("pool: duplicate slot id %q", spec.ID)
+		}
 		p.slots[spec.ID] = &slotState{spec: spec, cooldowns: make(map[string]time.Time)}
 		p.order = append(p.order, spec.ID)
 	}
 	sort.Strings(p.order)
+
+	for _, entry := range entries {
+		p.entries = append(p.entries, &entryState{
+			spec:    entry,
+			latency: make(map[string]time.Duration),
+			samples: make(map[string]int),
+		})
+	}
 	return p, nil
 }
 
@@ -226,10 +268,16 @@ func (p *Pool) Len() int {
 type Lease struct {
 	pool   *Pool
 	state  *slotState
-	tunnel *wgtunnel.Tunnel
+	dialer Dialer
 
 	// Slot describes the chosen egress.
-	Slot catalog.Slot
+	Slot Spec
+	// Entry is the entry tunnel used, for relay-socks slots.
+	Entry string
+	// Chained reports that traffic leaves through a proxy rather than directly
+	// out of a tunnel. The connection's remote address is then the proxy, not the
+	// destination, so callers must not treat it as the resolved destination.
+	Chained bool
 	// PublicIP is the last measured public address, invalid when unknown.
 	PublicIP netip.Addr
 	// Session is the sticky session the lease belongs to, if any.
@@ -238,9 +286,9 @@ type Lease struct {
 	released bool
 }
 
-// DialContext connects to address through the leased tunnel.
+// DialContext connects to address through the leased egress.
 func (l *Lease) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	return l.tunnel.DialContext(ctx, network, address)
+	return l.dialer.DialContext(ctx, network, address)
 }
 
 // Release returns the slot to the pool.
@@ -272,7 +320,7 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 			return nil, err
 		}
 
-		tunnel, err := p.ensureOpen(ctx, state)
+		dialer, entryID, err := p.ensureDialer(ctx, state)
 		if err != nil {
 			p.noteFailure(state, err)
 			lastErr = err
@@ -300,8 +348,10 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 		return &Lease{
 			pool:     p,
 			state:    state,
-			tunnel:   tunnel,
+			dialer:   dialer,
 			Slot:     state.spec,
+			Entry:    entryID,
+			Chained:  state.spec.Kind == KindRelaySocks,
 			PublicIP: publicIP,
 			Session:  pol.Session,
 		}, nil
@@ -463,6 +513,19 @@ func (p *Pool) closeLocked(state *slotState, reason string) {
 	}()
 }
 
+// ensureDialer returns something that can reach the internet as this slot, plus
+// the entry tunnel used (empty for WireGuard slots).
+func (p *Pool) ensureDialer(ctx context.Context, state *slotState) (Dialer, string, error) {
+	if state.spec.Kind == KindRelaySocks {
+		return p.dialerForSocksSlot(ctx, state)
+	}
+	tunnel, err := p.ensureOpen(ctx, state)
+	if err != nil {
+		return nil, "", err
+	}
+	return tunnel, "", nil
+}
+
 // ensureOpen returns a live tunnel for the slot, opening one if needed. Only one
 // caller opens a given slot; the others wait for it.
 func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunnel, error) {
@@ -484,7 +547,7 @@ func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunn
 		}
 		done := make(chan struct{})
 		state.opening = done
-		spec := state.spec
+		spec := state.spec.WG
 		p.mu.Unlock()
 
 		tunnel, err := p.openTunnel(ctx, spec)
@@ -619,6 +682,17 @@ func (p *Pool) dropSession(name string) {
 	p.mu.Lock()
 	delete(p.sessions, name)
 	p.mu.Unlock()
+}
+
+// NoteDialFailure records that a leased slot could not reach its destination.
+// The slot backs off, so the next attempt picks a different one. Relays disappear
+// from DNS and proxies refuse connections often enough that this has to be a
+// normal, cheap event rather than an error surfaced to the client.
+func (p *Pool) NoteDialFailure(lease *Lease, err error) {
+	if lease == nil || lease.state == nil || err == nil {
+		return
+	}
+	p.noteFailure(lease.state, err)
 }
 
 // Rotate forgets a sticky session so the next request picks a new slot. It
@@ -765,6 +839,11 @@ func (p *Pool) Warmup(ctx context.Context, count int) int {
 	if count <= 0 {
 		return 0
 	}
+	// In relay mode the expensive resource is the entry tunnels, not the slots,
+	// so warming means bringing the entries up.
+	if len(p.entries) > 0 {
+		return p.warmupEntries(ctx)
+	}
 	if p.opts.MaxActive > 0 && count > p.opts.MaxActive {
 		count = p.opts.MaxActive
 	}
@@ -821,6 +900,30 @@ func (p *Pool) Warmup(ctx context.Context, count int) int {
 	return opened
 }
 
+// warmupEntries opens every entry tunnel that the budget allows.
+func (p *Pool) warmupEntries(ctx context.Context) int {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	opened := 0
+	for _, entry := range p.entries {
+		wg.Add(1)
+		go func(e *entryState) {
+			defer wg.Done()
+			if ctx.Err() != nil {
+				return
+			}
+			if _, err := p.ensureEntryOpen(ctx, e); err != nil {
+				return
+			}
+			mu.Lock()
+			opened++
+			mu.Unlock()
+		}(entry)
+	}
+	wg.Wait()
+	return opened
+}
+
 // Close tears down every tunnel.
 func (p *Pool) Close() {
 	p.mu.Lock()
@@ -828,6 +931,7 @@ func (p *Pool) Close() {
 	for _, state := range p.slots {
 		p.closeLocked(state, "shutdown")
 	}
+	p.closeEntriesLocked("shutdown")
 }
 
 // expireLocked drops stale sessions, batches and cooldowns.

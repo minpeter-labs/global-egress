@@ -38,6 +38,8 @@ func main() {
 		err = runImport(os.Args[2:])
 	case "inspect":
 		err = runInspect(os.Args[2:])
+	case "relays":
+		err = runRelays(ctx, os.Args[2:])
 	case "probe":
 		err = runProbe(ctx, os.Args[2:])
 	case "serve":
@@ -67,6 +69,7 @@ func usage() {
 usage:
   global-egress import  -zip <bundle.zip> -dir <catalog-dir>
   global-egress inspect -catalog <dir|zip>
+  global-egress relays  [-cache <file>] [-country cc] [-refresh]
   global-egress probe   -catalog <dir|zip> [-limit N] [-concurrency N] [-country cc]
   global-egress serve   -config <config.yaml>
   global-egress version

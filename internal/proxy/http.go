@@ -211,9 +211,11 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 			if err != nil {
 				return nil, err
 			}
-			if err := s.deps.Guard.CheckResolved(conn.RemoteAddr()); err != nil {
-				_ = conn.Close()
-				return nil, err
+			if !lease.Chained {
+				if err := s.deps.Guard.CheckResolved(conn.RemoteAddr()); err != nil {
+					_ = conn.Close()
+					return nil, err
+				}
 			}
 			return conn, nil
 		},

@@ -42,6 +42,9 @@ type Deps struct {
 	RequireAuth bool
 	// DialTimeout bounds establishing the upstream connection.
 	DialTimeout time.Duration
+	// DialAttempts is how many different slots one request may try before giving
+	// up. Individual exits fail routinely, so a retry is normal operation.
+	DialAttempts int
 	// IdleTimeout closes relayed connections after inactivity. Zero disables it.
 	IdleTimeout time.Duration
 }
@@ -52,6 +55,9 @@ func (d *Deps) applyDefaults() {
 	}
 	if d.DialTimeout <= 0 {
 		d.DialTimeout = 30 * time.Second
+	}
+	if d.DialAttempts <= 0 {
+		d.DialAttempts = 3
 	}
 }
 
@@ -102,7 +108,8 @@ func (d *Deps) authorize(username, password string, hadCredentials bool) (policy
 	return pol, nil
 }
 
-// connectUpstream picks a slot and opens a connection to host:port through it.
+// connectUpstream picks a slot and opens a connection to host:port through it,
+// trying other slots when one fails.
 func (d *Deps) connectUpstream(ctx context.Context, pol policy.Policy, host string, port int) (net.Conn, *pool.Lease, error) {
 	if err := d.Guard.CheckPort(port); err != nil {
 		return nil, nil, err
@@ -110,28 +117,57 @@ func (d *Deps) connectUpstream(ctx context.Context, pol policy.Policy, host stri
 	if err := d.Guard.CheckHost(host); err != nil {
 		return nil, nil, err
 	}
+	address := net.JoinHostPort(host, strconv.Itoa(port))
 
-	lease, err := d.Pool.Acquire(ctx, pol, host)
-	if err != nil {
-		return nil, nil, err
+	var lastErr error
+	for attempt := 0; attempt < d.DialAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		lease, err := d.Pool.Acquire(ctx, pol, host)
+		if err != nil {
+			if lastErr != nil {
+				return nil, nil, lastErr
+			}
+			return nil, nil, err
+		}
+
+		conn, err := d.dialOnce(ctx, lease, address)
+		if err == nil {
+			return conn, lease, nil
+		}
+		// Back the slot off and let the next attempt choose another one.
+		d.Pool.NoteDialFailure(lease, err)
+		lease.Release()
+		lastErr = fmt.Errorf("proxy: dial %s via %s: %w", address, lease.Slot.ID, err)
+		d.Logger.Debug("egress attempt failed",
+			slog.String("target", address),
+			slog.String("slot", lease.Slot.ID),
+			slog.Int("attempt", attempt+1),
+			slog.Any("error", err))
 	}
+	return nil, nil, lastErr
+}
 
+func (d *Deps) dialOnce(ctx context.Context, lease *pool.Lease, address string) (net.Conn, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, d.DialTimeout)
 	defer cancel()
 
-	address := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := lease.DialContext(dialCtx, "tcp", address)
 	if err != nil {
-		lease.Release()
-		return nil, nil, fmt.Errorf("proxy: dial %s via %s: %w", address, lease.Slot.ID, err)
+		return nil, err
 	}
-	// A name may resolve into internal space, so re-check what we actually got.
-	if err := d.Guard.CheckResolved(conn.RemoteAddr()); err != nil {
-		_ = conn.Close()
-		lease.Release()
-		return nil, nil, err
+	// With a direct tunnel the peer address is the destination, so a name that
+	// resolved into internal space can still be caught here. Through a proxy the
+	// peer address is the proxy itself and the destination is resolved at the
+	// exit, so there is nothing local left to verify.
+	if !lease.Chained {
+		if err := d.Guard.CheckResolved(conn.RemoteAddr()); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
 	}
-	return conn, lease, nil
+	return conn, nil
 }
 
 // replyCodeFor maps an internal failure to the closest SOCKS5 reply code, so

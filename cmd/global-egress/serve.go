@@ -18,6 +18,7 @@ import (
 	"github.com/minpeter-labs/global-egress/internal/netguard"
 	"github.com/minpeter-labs/global-egress/internal/pool"
 	"github.com/minpeter-labs/global-egress/internal/proxy"
+	"github.com/minpeter-labs/global-egress/internal/relaylist"
 )
 
 func runServe(ctx context.Context, args []string) error {
@@ -49,6 +50,11 @@ func runServe(ctx context.Context, args []string) error {
 			slog.Int("distinct_keys", bundle.DistinctKeys))
 	}
 
+	specs, entrySlots, err := buildSlots(ctx, cfg, bundle, logger)
+	if err != nil {
+		return err
+	}
+
 	guard, err := netguard.New(cfg.Destinations.DeniedCIDRs, cfg.Destinations.AllowedPorts)
 	if err != nil {
 		return err
@@ -61,7 +67,7 @@ func runServe(ctx context.Context, args []string) error {
 		logger.Warn("access.allowed_clients is empty: every host that can reach the listeners may use them")
 	}
 
-	egressPool, err := pool.New(bundle, pool.Options{
+	egressPool, err := pool.NewWithSpecs(specs, entrySlots, pool.Options{
 		MaxActive:          cfg.Pool.MaxActive,
 		SessionTTL:         cfg.Pool.SessionTTL,
 		BatchTTL:           cfg.Pool.BatchTTL,
@@ -105,6 +111,7 @@ func runServe(ctx context.Context, args []string) error {
 		Password:       cfg.Access.Password,
 		RequireAuth:    cfg.Access.RequireAuth,
 		DialTimeout:    cfg.Pool.DialTimeout,
+		DialAttempts:   cfg.Pool.DialAttempts,
 		IdleTimeout:    cfg.Pool.RelayIdleTimeout,
 	}
 
@@ -234,4 +241,45 @@ func newLogger(cfg config.LogConfig) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
+}
+
+// buildSlots assembles the egress slots for the configured mode.
+//
+// In relay-socks mode the slots come from the provider's relay list and the
+// catalog only supplies the entry tunnels. In WireGuard mode every catalog entry
+// becomes a slot of its own.
+func buildSlots(ctx context.Context, cfg config.Config, bundle *catalog.Bundle, logger *slog.Logger) ([]pool.Spec, []catalog.Slot, error) {
+	if cfg.Mode == config.ModeWireGuard {
+		logger.Info("mode: wireguard (one tunnel per slot)",
+			slog.Int("slots", len(bundle.Slots)))
+		return pool.SpecsFromBundle(bundle), nil, nil
+	}
+
+	cachePath := cfg.RelayCachePath()
+	list, fetched, err := relaylist.LoadOrFetch(ctx, cfg.Relays.URL, cachePath, cfg.Relays.Refresh)
+	if err != nil {
+		return nil, nil, fmt.Errorf("relay list: %w", err)
+	}
+	relays := list.Usable()
+	if len(relays) == 0 {
+		return nil, nil, fmt.Errorf("relay list contains no usable relays")
+	}
+
+	entrySlots, err := resolveEntries(bundle, cfg.Entries.Slots, cfg.Entries.Auto)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	entryNames := make([]string, 0, len(entrySlots))
+	for _, slot := range entrySlots {
+		entryNames = append(entryNames, slot.ID)
+	}
+	logger.Info("mode: relay-socks (shared entry tunnels, one exit per relay)",
+		slog.Int("exits", len(relays)),
+		slog.Int("countries", len(list.Countries())),
+		slog.Int("cities", len(list.Cities())),
+		slog.Bool("relay_list_refreshed", fetched),
+		slog.String("entries", strings.Join(entryNames, ",")))
+
+	return pool.SpecsFromRelays(relays), entrySlots, nil
 }

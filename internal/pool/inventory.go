@@ -14,16 +14,17 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/minpeter-labs/global-egress/internal/wgtunnel"
 )
 
 // SlotInfo is the public view of one slot.
 type SlotInfo struct {
-	ID       string `json:"id"`
-	Country  string `json:"country,omitempty"`
-	City     string `json:"city,omitempty"`
-	Endpoint string `json:"endpoint"`
+	ID      string `json:"id"`
+	Country string `json:"country,omitempty"`
+	City    string `json:"city,omitempty"`
+	Kind    string `json:"kind"`
+	// Target is the endpoint for WireGuard slots, or the proxy address for
+	// relay-socks slots.
+	Target string `json:"target"`
 
 	Open   bool `json:"open"`
 	Leases int  `json:"leases"`
@@ -69,7 +70,8 @@ func (p *Pool) Slots(filter SlotFilter) []SlotInfo {
 			ID:        state.spec.ID,
 			Country:   state.spec.Country,
 			City:      state.spec.City,
-			Endpoint:  state.spec.Endpoint,
+			Kind:      state.spec.Kind.String(),
+			Target:    state.spec.Target(),
 			Open:      state.isOpen(),
 			Leases:    state.leases,
 			Failures:  state.failures,
@@ -105,6 +107,9 @@ type Stats struct {
 	Sessions  int `json:"sticky_sessions"`
 	Batches   int `json:"unique_batches"`
 	MaxActive int `json:"max_active"`
+	// Entries counts the shared entry tunnels that relay-socks slots ride on.
+	Entries     int `json:"entries"`
+	EntriesOpen int `json:"entries_open"`
 	// NewTunnelsUsed is how much of the new-tunnel rate budget has been spent in
 	// the current window, and NewTunnelBudget is the cap. Watching these tells
 	// you whether rotation requests are being slowed down to protect the key.
@@ -129,6 +134,7 @@ func (p *Pool) Stats() Stats {
 		Sessions:        len(p.sessions),
 		Batches:         len(p.batches),
 		MaxActive:       p.opts.MaxActive,
+		Entries:         len(p.entries),
 		NewTunnelsUsed:  len(p.opens),
 		NewTunnelBudget: p.opts.NewTunnelBudget,
 		NewTunnelWindow: p.opts.NewTunnelWindow.String(),
@@ -159,6 +165,11 @@ func (p *Pool) Stats() Stats {
 			cities[state.spec.City] = struct{}{}
 		}
 	}
+	for _, entry := range p.entries {
+		if entry.isOpen() {
+			stats.EntriesOpen++
+		}
+	}
 	stats.UniqueIPs = len(ips)
 	stats.Countries = len(countries)
 	stats.Cities = len(cities)
@@ -173,7 +184,10 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 	}
 	p.mu.Lock()
 	fresh := state.publicIP.IsValid() && time.Since(state.ipCheckedAt) < p.opts.IPRefreshInterval
-	if fresh || state.ipChecking || state.tunnel == nil {
+	// A WireGuard slot can only be measured while its tunnel is up; a relay-socks
+	// slot can be measured whenever an entry is available.
+	if fresh || state.ipChecking ||
+		(state.spec.Kind == KindWireGuard && state.tunnel == nil) {
 		p.mu.Unlock()
 		return
 	}
@@ -198,7 +212,16 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 		ctx, cancel := context.WithTimeout(context.Background(), p.opts.IPCheckTimeout)
 		defer cancel()
 
-		ip, err := FetchPublicIP(ctx, tunnel, p.opts.IPCheckURL)
+		var dialer Dialer = tunnel
+		if state.spec.Kind == KindRelaySocks {
+			socks, _, err := p.dialerForSocksSlot(ctx, state)
+			if err != nil {
+				return
+			}
+			dialer = socks
+		}
+
+		ip, err := FetchPublicIP(ctx, dialer, p.opts.IPCheckURL)
 		if err != nil {
 			p.log.Debug("public IP check failed",
 				slog.String("slot", state.spec.ID), slog.Any("error", err))
@@ -220,10 +243,10 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 //
 // The response is accepted either as a bare address or as JSON containing an
 // "ip" field, which covers both plain echo endpoints and richer services.
-func FetchPublicIP(ctx context.Context, tunnel *wgtunnel.Tunnel, url string) (netip.Addr, error) {
+func FetchPublicIP(ctx context.Context, dialer Dialer, url string) (netip.Addr, error) {
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext:           tunnel.DialContext,
+			DialContext:           dialer.DialContext,
 			DisableKeepAlives:     true,
 			ForceAttemptHTTP2:     false,
 			TLSHandshakeTimeout:   10 * time.Second,
@@ -386,16 +409,16 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 				Slot:     st.spec.ID,
 				Country:  st.spec.Country,
 				City:     st.spec.City,
-				Endpoint: st.spec.Endpoint,
+				Endpoint: st.spec.Target(),
 			}
 			started := time.Now()
 
-			tunnel, err := p.openTunnel(ctx, st.spec)
+			dialer, closer, err := p.probeDialer(ctx, st)
 			if err != nil {
 				result.Err = err.Error()
 			} else {
 				ipCtx, cancel := context.WithTimeout(ctx, p.opts.IPCheckTimeout)
-				ip, ipErr := FetchPublicIP(ipCtx, tunnel, p.opts.IPCheckURL)
+				ip, ipErr := FetchPublicIP(ipCtx, dialer, p.opts.IPCheckURL)
 				cancel()
 				if ipErr != nil {
 					result.Err = ipErr.Error()
@@ -409,7 +432,9 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 					st.disabledUntil = time.Time{}
 					p.mu.Unlock()
 				}
-				_ = tunnel.Close()
+				if closer != nil {
+					closer()
+				}
 			}
 			if result.Err != "" {
 				p.mu.Lock()
@@ -559,6 +584,9 @@ func (p *Pool) housekeep() {
 	var idle []*slotState
 	if p.opts.IdleTimeout > 0 {
 		for _, state := range p.slots {
+			if state.spec.Kind != KindWireGuard {
+				continue
+			}
 			if state.isOpen() && state.leases == 0 && !state.lastUsed.IsZero() &&
 				now.Sub(state.lastUsed) > p.opts.IdleTimeout {
 				idle = append(idle, state)
@@ -572,7 +600,10 @@ func (p *Pool) housekeep() {
 	// service.
 	var refresh []*slotState
 	for _, state := range p.slots {
-		if !state.isOpen() || state.ipChecking {
+		if state.ipChecking {
+			continue
+		}
+		if state.spec.Kind == KindWireGuard && !state.isOpen() {
 			continue
 		}
 		if !state.publicIP.IsValid() || now.Sub(state.ipCheckedAt) > p.opts.IPRefreshInterval {
@@ -587,4 +618,22 @@ func (p *Pool) housekeep() {
 	for _, state := range refresh {
 		p.maybeCheckIP(state)
 	}
+}
+
+// probeDialer builds a throwaway dialer for a probe run. The returned closer, when
+// non-nil, releases resources the probe created just for this measurement.
+//
+// WireGuard slots get a dedicated tunnel that is torn down immediately, so a
+// sweep does not end up holding hundreds of tunnels open. Relay-socks slots reuse
+// the shared entries and have nothing to release.
+func (p *Pool) probeDialer(ctx context.Context, state *slotState) (Dialer, func(), error) {
+	if state.spec.Kind == KindRelaySocks {
+		dialer, _, err := p.dialerForSocksSlot(ctx, state)
+		return dialer, nil, err
+	}
+	tunnel, err := p.openTunnel(ctx, state.spec.WG)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tunnel, func() { _ = tunnel.Close() }, nil
 }

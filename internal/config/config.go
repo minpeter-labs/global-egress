@@ -14,8 +14,27 @@ import (
 	"github.com/minpeter-labs/global-egress/internal/netguard"
 )
 
+// Mode selects where exit addresses come from.
+type Mode string
+
+const (
+	// ModeWireGuard gives every slot its own tunnel. Simple and self-contained,
+	// but each slot costs a provider key association, which is rate-limited.
+	ModeWireGuard Mode = "wireguard"
+	// ModeRelaySocks keeps a few entry tunnels up and exits through the SOCKS
+	// proxy on each provider relay. Many more addresses, near-instant rotation,
+	// and almost no key associations.
+	ModeRelaySocks Mode = "relay-socks"
+)
+
 // Config is the on-disk configuration.
 type Config struct {
+	// Mode selects the egress strategy. Defaults to relay-socks.
+	Mode Mode `yaml:"mode"`
+	// Relays configures the provider relay list used by relay-socks mode.
+	Relays RelayConfig `yaml:"relays"`
+	// Entries selects which tunnels relay-socks mode rides on.
+	Entries EntryConfig `yaml:"entries"`
 	// Catalog points at the WireGuard bundle: either a directory of .conf files
 	// or a .zip archive.
 	Catalog CatalogConfig `yaml:"catalog"`
@@ -31,6 +50,26 @@ type Config struct {
 	StateDir string `yaml:"state_dir"`
 	// Log configures logging.
 	Log LogConfig `yaml:"log"`
+}
+
+// RelayConfig locates the provider relay list.
+type RelayConfig struct {
+	// URL is the relay list endpoint.
+	URL string `yaml:"url"`
+	// Cache is where the list is stored; relative paths resolve under state_dir.
+	Cache string `yaml:"cache"`
+	// Refresh is how long a cached list is trusted before refetching.
+	Refresh time.Duration `yaml:"refresh"`
+}
+
+// EntryConfig selects the entry tunnels for relay-socks mode.
+type EntryConfig struct {
+	// Slots names catalog slots to use as entries, e.g. ["jp-tyo-wg-001"].
+	// Prefer listing these explicitly: the best entry depends on where this
+	// service runs, which cannot be derived from the catalog.
+	Slots []string `yaml:"slots"`
+	// Auto picks this many entries spread across regions when Slots is empty.
+	Auto int `yaml:"auto"`
 }
 
 // CatalogConfig locates the WireGuard configuration bundle.
@@ -124,6 +163,13 @@ type LogConfig struct {
 // Default returns a configuration with every optional value populated.
 func Default() Config {
 	return Config{
+		Mode: ModeRelaySocks,
+		Relays: RelayConfig{
+			URL:     "https://api.mullvad.net/www/relays/wireguard/",
+			Cache:   "relays.json",
+			Refresh: 24 * time.Hour,
+		},
+		Entries: EntryConfig{Auto: 2},
 		Listen: ListenConfig{
 			SOCKS5:  "127.0.0.1:1080",
 			HTTP:    "127.0.0.1:3128",
@@ -204,6 +250,19 @@ func (c *Config) Validate() error {
 	if c.Catalog.Path == "" {
 		return fmt.Errorf("config: catalog.path is required")
 	}
+	switch c.Mode {
+	case ModeWireGuard, ModeRelaySocks:
+	default:
+		return fmt.Errorf("config: mode %q is not %q or %q", c.Mode, ModeWireGuard, ModeRelaySocks)
+	}
+	if c.Mode == ModeRelaySocks {
+		if len(c.Entries.Slots) == 0 && c.Entries.Auto <= 0 {
+			return fmt.Errorf("config: relay-socks mode needs entries.slots or entries.auto")
+		}
+		if c.Relays.Refresh < 0 {
+			return fmt.Errorf("config: relays.refresh must not be negative")
+		}
+	}
 	if c.Listen.SOCKS5 == "" && c.Listen.HTTP == "" {
 		return fmt.Errorf("config: at least one of listen.socks5 or listen.http must be set")
 	}
@@ -253,6 +312,20 @@ func (c *Config) AllowedClientPrefixes() ([]netip.Prefix, error) {
 		out = append(out, prefix.Masked())
 	}
 	return out, nil
+}
+
+// RelayCachePath resolves the relay list cache location.
+func (c *Config) RelayCachePath() string {
+	if c.Relays.Cache == "" {
+		return ""
+	}
+	if filepath.IsAbs(c.Relays.Cache) {
+		return c.Relays.Cache
+	}
+	if c.StateDir == "" {
+		return c.Relays.Cache
+	}
+	return filepath.Join(c.StateDir, c.Relays.Cache)
 }
 
 // InventoryPath is where measured public IPs are persisted.
