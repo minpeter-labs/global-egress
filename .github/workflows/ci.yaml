@@ -4,37 +4,72 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+# A new push to the same branch makes the previous run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
-      - uses: actions/setup-go@v5
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: formatting (gofumpt + goimports)
-        run: make fmtcheck
-
-      - name: vet
-        run: go vet ./...
-
-      - name: lint
-        uses: golangci/golangci-lint-action@v8
+      # Runs the linters from .golangci.yaml, which includes govet, so there is no
+      # separate `go vet` step.
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+      # Same binary and same config as the step above, so CI cannot disagree with
+      # what `make fmt` produces locally. gofumpt and goimports are configured as
+      # formatters in .golangci.yaml.
+      - name: formatting (gofumpt + goimports)
+        run: golangci-lint fmt --diff ./...
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: go build ./...
 
       - name: test
         run: go test ./...
 
+      # The pool hands slots to concurrent requests and learns entry latency from
+      # them, so the race detector earns its keep here.
       - name: test with race detector
         run: go test -race ./...
 
-      - name: build
-        run: go build ./...
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

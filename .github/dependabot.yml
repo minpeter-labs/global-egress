@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # wireguard-go and gvisor move often; group them so one PR covers the tunnel
+    # stack instead of three.
+    groups:
+      tunnel-stack:
+        patterns:
+          - golang.zx2c4.com/*
+          - gvisor.dev/*
+      golang-x:
+        patterns:
+          - golang.org/x/*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

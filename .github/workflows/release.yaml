@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # CGO stays off so the binary runs on musl systems such as Alpine, which is
+      # the usual target for a small egress container.
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          version="${GITHUB_REF_NAME}"
+          name="global-egress-${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags "-X main.version=${version} -s -w" -o "${name}" ./cmd/global-egress
+          sha256sum "${name}" > "${name}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: global-egress-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            global-egress-*
+            !*.sha256
+
+      - name: attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" global-egress-* --clobber

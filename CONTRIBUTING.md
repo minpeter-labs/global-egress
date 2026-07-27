@@ -9,13 +9,18 @@ make lint    # golangci-lint
 make build   # ./bin/global-egress
 ```
 
-`make tools` installs the pinned versions of `gofumpt`, `goimports` and
-`golangci-lint` into `$(go env GOPATH)/bin`; the other targets call it as needed.
+`make tools` installs the pinned `golangci-lint` into `$(go env GOPATH)/bin`; the
+other targets call it as needed.
 
-Formatting is enforced with **gofumpt** rather than plain `gofmt`. gofumpt is a
-strict superset, so gofmt-clean is implied, and it settles a few things gofmt
-leaves open. **goimports** keeps imports in three groups - standard library,
-external, then this module - with `-local github.com/minpeter-labs/global-egress`.
+Formatting goes through `golangci-lint fmt`, which is configured in
+`.golangci.yaml` to run **gofumpt** and **goimports**. gofumpt is a strict superset
+of gofmt, so gofmt-clean is implied, and goimports keeps imports in three groups -
+standard library, external, then this module. Using the one binary for both local
+runs and CI means the two cannot drift apart.
+
+CI runs three jobs in parallel: `lint` (golangci-lint plus the formatting diff),
+`test` (build, tests, tests under the race detector) and `vulncheck`
+(`govulncheck`).
 
 There are no external services in the unit tests: WireGuard and SOCKS behaviour is
 exercised against in-process fakes, and anything that would dial a provider is
