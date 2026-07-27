@@ -106,11 +106,16 @@ global-egress inspect -catalog /var/lib/global-egress/wireguard
 # 3. See the relay list that relay-socks mode exits through.
 global-egress relays -cache /var/lib/global-egress/relays.json
 
-# 4. Optional: measure the exit IP of each slot and store an inventory.
-#    In wireguard mode, pace it (-interval): providers rate-limit handshakes per
-#    device key, and an unpaced sweep starts failing part-way through.
+# 4. Measure the exit IP of every slot and store an inventory. In relay-socks mode
+#    this rides the shared entry tunnels, so a full sweep is cheap and safe.
 global-egress probe -catalog /var/lib/global-egress/wireguard \
-  -state /var/lib/global-egress/inventory.json \
+  -mode relay-socks -relay-cache /var/lib/global-egress/relays.json \
+  -state /var/lib/global-egress/inventory.json -concurrency 6
+
+#    In wireguard mode, pace it (-interval): each exit costs a key association, and
+#    an unpaced sweep gets the key rate-limited part-way through.
+global-egress probe -catalog /var/lib/global-egress/wireguard \
+  -mode wireguard -state /var/lib/global-egress/inventory.json \
   -concurrency 2 -interval 2s
 
 # 5. Run the service.
@@ -259,6 +264,14 @@ real exit IP of each slot and stores an inventory, and `uniq=` batches are
 enforced against those measured addresses rather than server names. On a 532-slot
 Mullvad bundle every reachable slot turned out to have its own address (456
 slots, 456 distinct IPs), but that is a property of the provider, not a promise.
+
+**Entry failures are attributed to the entry.** A tunnel that is up but no longer
+carrying traffic can only be detected by the dials riding on it. Three consecutive
+failures take that entry out of rotation and drop its tunnel so the next use
+re-handshakes; without this the exits behind a dead entry get blamed one by one and a
+healthy catalogue slowly disables itself. Verified in place by blackholing an entry's
+endpoint: one request fails, the pool moves on, and the entry rejoins by itself once
+the path returns.
 
 **Bulk probing hits provider rate limits.** Sweeping a large bundle quickly gets
 the device key throttled, after which every handshake fails for a while. Use

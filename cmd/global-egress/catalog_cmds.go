@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/minpeter-labs/global-egress/internal/catalog"
+	"github.com/minpeter-labs/global-egress/internal/mullvad"
 	"github.com/minpeter-labs/global-egress/internal/pool"
 )
 
@@ -138,6 +139,12 @@ func runProbe(ctx context.Context, args []string) error {
 	limit := fs.Int("limit", 0, "stop after N slots (0 = all)")
 	country := fs.String("country", "", "only probe this country code")
 	city := fs.String("city", "", "only probe this city label, e.g. us-lax")
+	mode := fs.String("mode", "relay-socks",
+		"what to probe: relay-socks (provider proxy exits through entry tunnels) or wireguard (one tunnel per exit)")
+	entryNames := fs.String("entries", "",
+		"comma-separated catalog slots to use as entry tunnels in relay-socks mode (default: 2 picked across regions)")
+	relayURL := fs.String("relay-url", relaylistDefaultURL, "relay list endpoint for relay-socks mode")
+	relayCache := fs.String("relay-cache", "", "relay list cache file")
 	slots := fs.String("slots", "", "comma-separated slot ids to probe (for retrying failures)")
 	slotsFile := fs.String("slots-file", "", "file containing slot ids, comma or newline separated")
 	handshakeTimeout := fs.Duration("handshake-timeout", 12*time.Second,
@@ -175,7 +182,15 @@ func runProbe(ctx context.Context, args []string) error {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
-	egressPool, err := pool.New(bundle, pool.Options{
+	// relay-socks probes hundreds of exits over a couple of shared tunnels, which
+	// is both far faster and free of the per-key handshake limits that make a
+	// wireguard-mode sweep risky.
+	specs, entrySlots, err := probeSlots(ctx, *mode, bundle, *entryNames, *relayURL, *relayCache, logger)
+	if err != nil {
+		return err
+	}
+
+	egressPool, err := pool.NewWithSpecs(specs, entrySlots, pool.Options{
 		Logger:             logger,
 		IPCheckURL:         *url,
 		IPCheckConcurrency: *concurrency,
@@ -184,12 +199,12 @@ func runProbe(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer egressPool.Close()
 
 	selected, err := collectSlotIDs(*slots, *slotsFile)
 	if err != nil {
 		return err
 	}
-	defer egressPool.Close()
 
 	if *statePath != "" {
 		if restored, err := egressPool.LoadInventory(*statePath); err != nil {
@@ -294,4 +309,54 @@ func firstLine(value string) string {
 		value = value[:90] + "..."
 	}
 	return value
+}
+
+// relaylistDefaultURL mirrors the provider default so the probe flag has the same
+// value as the service config without importing the provider package twice.
+const relaylistDefaultURL = mullvad.DefaultURL
+
+// probeSlots assembles what to probe for the requested mode.
+//
+// relay-socks is the default because it is what the service runs and because it is
+// safe to sweep: exits are reached over a couple of shared tunnels, so a full
+// catalogue costs two key associations rather than one per exit.
+func probeSlots(
+	ctx context.Context,
+	mode string,
+	bundle *catalog.Bundle,
+	entryNames, relayURL, relayCache string,
+	logger *slog.Logger,
+) ([]pool.Spec, []catalog.Slot, error) {
+	switch mode {
+	case "wireguard":
+		return pool.SpecsFromBundle(bundle), nil, nil
+	case "relay-socks":
+	default:
+		return nil, nil, fmt.Errorf("-mode must be relay-socks or wireguard")
+	}
+
+	list, _, err := mullvad.LoadOrFetch(ctx, relayURL, relayCache, 24*time.Hour)
+	if err != nil {
+		return nil, nil, fmt.Errorf("relay list: %w", err)
+	}
+	relays := list.Usable()
+
+	var names []string
+	if strings.TrimSpace(entryNames) != "" {
+		names = strings.Split(entryNames, ",")
+	}
+	entrySlots, err := resolveEntries(bundle, names, 2)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ids := make([]string, 0, len(entrySlots))
+	for _, slot := range entrySlots {
+		ids = append(ids, slot.ID)
+	}
+	logger.Info("probing relay proxies",
+		slog.Int("exits", len(relays)),
+		slog.String("entries", strings.Join(ids, ",")))
+
+	return pool.SpecsFromExits(exitsFromRelays(relays)), entrySlots, nil
 }

@@ -762,12 +762,17 @@ func (p *Pool) dropSession(name string) {
 	p.mu.Unlock()
 }
 
-// NoteDialFailure records that a leased slot could not reach its destination.
-// The slot backs off, so the next attempt picks a different one. Relays disappear
-// from DNS and proxies refuse connections often enough that this has to be a
-// normal, cheap event rather than an error surfaced to the client.
+// NoteDialFailure records that a leased egress could not reach its destination.
+//
+// The failure is attributed to the entry tunnel first when the lease used one. A
+// dead entry makes every exit behind it look broken, so blaming the exits would
+// both hide the real fault and slowly disable a healthy catalogue.
 func (p *Pool) NoteDialFailure(lease *Lease, err error) {
 	if lease == nil || lease.state == nil || err == nil {
+		return
+	}
+	if lease.Entry != "" && p.noteEntryFailure(lease.Entry, err) {
+		// The entry has been taken out of rotation; the exit is not at fault.
 		return
 	}
 	p.noteFailure(lease.state, err)

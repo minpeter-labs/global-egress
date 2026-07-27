@@ -91,6 +91,35 @@ Set `LimitNOFILE` generously; the shipped systemd unit uses 65535.
 - 30 tunnels pre-opened concurrently: ~300 ms wall clock
 - 6 slots probed with concurrency 3: 5 s total
 
+## Definitive exit-IP inventory (relay-socks, measured in place)
+
+Run from the deployment guest over three shared entry tunnels, so the whole sweep
+cost three key associations rather than one per exit:
+
+```text
+probed            532 exits in 3m0s at concurrency 10
+reachable         455
+retry of the 77   69 more reachable at concurrency 4
+------------------------------------------------------
+measured          524 / 532
+unique public IPs 524
+duplicates        0
+ratio             1.0000 unique IP per measured exit
+countries         50
+distinct /16      92
+```
+
+**524 distinct exit addresses, no sharing whatsoever.** That is the real ceiling for
+`uniq=` batches on this bundle.
+
+The 77 first-pass failures were concentrated in Europe (de 13/21, nl 10/17, ch 8/11,
+gb 9/23) and 69 of them succeeded on a retry at lower concurrency, so they were
+contention on the European entry rather than dead exits. Sweep at concurrency 4-6 if
+a single clean pass matters.
+
+Contrast with wireguard mode below: the same catalogue measured 456 exits, needed
+456 key associations, and got the device key blocked for hours.
+
 ## How many unique exit IPs a bundle really provides
 
 Measured against a 532-slot Mullvad bundle (device "Fast Pike"), sweeping the

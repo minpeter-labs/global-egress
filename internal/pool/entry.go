@@ -41,6 +41,15 @@ type entryState struct {
 // without letting one slow connection dominate.
 const ewmaAlpha = 0.3
 
+// entryFailureThreshold is how many consecutive failed dials through an entry take
+// it out of rotation.
+//
+// An entry whose tunnel is up but no longer carrying traffic is the awkward case:
+// nothing about the device object says it is broken, so only the dials that ride on
+// it can reveal it. Three is one request's worth of attempts, which means a single
+// failed request is enough to move the whole pool off a dead entry.
+const entryFailureThreshold = 3
+
 // priorLatency converts a geographic prior into a pseudo-latency so that
 // unmeasured entries can be ordered against measured ones. The unit is arbitrary
 // but the scale is deliberately pessimistic: a real measurement almost always
@@ -157,6 +166,63 @@ func (p *Pool) recordEntryLatency(entry *entryState, exitCountry string, observe
 			ewmaAlpha*float64(observed) + (1-ewmaAlpha)*float64(previous))
 	}
 	entry.samples[exitCountry]++
+	// A dial that completed is proof the entry works, so forget earlier failures.
+	entry.failures = 0
+	entry.lastError = ""
+}
+
+// noteEntryFailure records a failed dial through an entry and reports whether the
+// entry was taken out of rotation as a result.
+//
+// Blaming the entry matters twice over: it moves traffic off a dead path within one
+// request, and it stops the exits from being blamed for a fault that was never
+// theirs. Without it a single broken entry slowly marks hundreds of healthy relays
+// as failing.
+func (p *Pool) noteEntryFailure(entryID string, err error) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var entry *entryState
+	for _, candidate := range p.entries {
+		if candidate.spec.ID == entryID {
+			entry = candidate
+			break
+		}
+	}
+	if entry == nil {
+		return false
+	}
+
+	entry.failures++
+	entry.lastError = err.Error()
+	if entry.failures < entryFailureThreshold {
+		return false
+	}
+
+	backoff := p.opts.FailureBackoff << min(entry.failures-entryFailureThreshold, 5)
+	if maxBackoff := 10 * time.Minute; backoff > maxBackoff {
+		backoff = maxBackoff
+	}
+	entry.disabledUntil = time.Now().Add(backoff)
+
+	// Drop the tunnel so the next use re-handshakes rather than reusing a device
+	// that is up but not carrying traffic.
+	if entry.tunnel != nil {
+		tunnel := entry.tunnel
+		entry.tunnel = nil
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			_ = tunnel.Close()
+		}()
+	}
+
+	p.log.Warn("entry taken out of rotation",
+		slog.String("entry", entryID),
+		slog.Int("consecutive_failures", entry.failures),
+		slog.Duration("backoff", backoff),
+		slog.Any("error", err))
+	return true
 }
 
 // ensureEntryOpen brings an entry tunnel up, or returns the live one. Only one

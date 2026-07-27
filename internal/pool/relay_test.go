@@ -388,3 +388,82 @@ func TestStatsReportConnectionLimits(t *testing.T) {
 		t.Errorf("limits not reported: %+v", stats)
 	}
 }
+
+func TestEntryFailuresTakeTheEntryOutOfRotation(t *testing.T) {
+	// An entry whose tunnel is up but no longer carries traffic can only be
+	// detected through the dials that ride on it. Repeated failures must blame the
+	// entry, not the exits behind it.
+	p := newRelayPool(t, Options{FailureBackoff: time.Minute})
+	entry := entryByID(t, p, "jp-tyo-wg-001")
+
+	failure := errors.New("i/o timeout")
+	for i := 1; i < entryFailureThreshold; i++ {
+		if p.noteEntryFailure(entry.spec.ID, failure) {
+			t.Fatalf("entry removed after only %d failures", i)
+		}
+	}
+	if !p.noteEntryFailure(entry.spec.ID, failure) {
+		t.Fatalf("entry still in rotation after %d failures", entryFailureThreshold)
+	}
+
+	p.mu.Lock()
+	disabled := time.Now().Before(entry.disabledUntil)
+	remaining := len(p.orderedEntriesLocked("jp", time.Now()))
+	p.mu.Unlock()
+
+	if !disabled {
+		t.Error("entry should be backed off")
+	}
+	if remaining != 1 {
+		t.Errorf("ordered entries = %d, want 1 after disabling one of two", remaining)
+	}
+}
+
+func TestSuccessfulDialClearsEntryFailures(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	entry := entryByID(t, p, "jp-tyo-wg-001")
+
+	p.noteEntryFailure(entry.spec.ID, errors.New("transient"))
+	p.recordEntryLatency(entry, "jp", 200*time.Millisecond)
+
+	p.mu.Lock()
+	failures := entry.failures
+	p.mu.Unlock()
+	if failures != 0 {
+		t.Errorf("failures = %d after a successful dial, want 0", failures)
+	}
+}
+
+func TestDialFailureBlamesEntryNotExit(t *testing.T) {
+	p := newRelayPool(t, Options{FailureBackoff: time.Minute})
+	state := p.slots["jp-tyo-wg-socks5-001"]
+	lease := &Lease{pool: p, state: state, Slot: state.spec, Entry: "jp-tyo-wg-001", Chained: true}
+
+	failure := errors.New("i/o timeout")
+	for range entryFailureThreshold {
+		p.NoteDialFailure(lease, failure)
+	}
+
+	p.mu.Lock()
+	entryFailures := entryByIDLocked(p, "jp-tyo-wg-001").failures
+	slotFailures := state.failures
+	p.mu.Unlock()
+
+	if entryFailures < entryFailureThreshold {
+		t.Errorf("entry failures = %d, want at least %d", entryFailures, entryFailureThreshold)
+	}
+	// The last failure was attributed to the entry, so the exit must not have
+	// absorbed all of them.
+	if slotFailures >= entryFailureThreshold {
+		t.Errorf("exit failures = %d; the entry should have been blamed instead", slotFailures)
+	}
+}
+
+func entryByIDLocked(p *Pool, id string) *entryState {
+	for _, entry := range p.entries {
+		if entry.spec.ID == id {
+			return entry
+		}
+	}
+	return nil
+}
