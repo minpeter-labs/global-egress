@@ -81,6 +81,9 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errPolicyRequired) {
+			// 407 rather than 400: the directives arrive as proxy credentials, so
+			// "send credentials" is both the accurate diagnosis and the fix, and it
+			// is the status clients already know how to surface.
 			w.Header().Set("Proxy-Authenticate", `Basic realm="global-egress"`)
 			http.Error(w, "no selection policy supplied: put the directives in the proxy "+
 				"username and give a non-empty password, e.g. \"cc=jp:x\". Several clients "+

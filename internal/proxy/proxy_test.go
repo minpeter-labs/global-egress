@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/minpeter-labs/global-egress/internal/policy"
 	"github.com/minpeter-labs/global-egress/internal/pool"
@@ -245,5 +248,66 @@ func TestEgressHeadersReportTheAppliedPolicy(t *testing.T) {
 	headers = egressHeaders(lease, policy.Policy{})
 	if got := headers["X-Egress-Policy"]; got != "(any)" {
 		t.Errorf("X-Egress-Policy for an empty policy = %q, want (any)", got)
+	}
+}
+
+// TestSOCKS5RejectsWhenPolicyRequired covers the protocol that has no header to fall
+// back on: for SOCKS5 the refusal is the only thing standing between a caller that
+// dropped its credentials and a silently wrong exit.
+func TestSOCKS5RejectsWhenPolicyRequired(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	// Pool is nil on purpose: the rejection must happen during negotiation, before
+	// anything tries to select an exit.
+	server := NewSOCKS5(Deps{
+		RequirePolicy: true,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = server.Serve(ctx, listener) }()
+
+	negotiate := func(username string) byte {
+		conn, err := net.DialTimeout("tcp", listener.Addr().String(), 3*time.Second)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+
+		// Offer username/password, which is how a policy would be carried.
+		if _, err := conn.Write([]byte{socksVersion, 1, methodUserPass}); err != nil {
+			t.Fatalf("write greeting: %v", err)
+		}
+		reply := make([]byte, 2)
+		if _, err := io.ReadFull(conn, reply); err != nil {
+			t.Fatalf("read greeting reply: %v", err)
+		}
+		if reply[1] != methodUserPass {
+			t.Fatalf("server chose method 0x%02x, want username/password", reply[1])
+		}
+
+		request := []byte{userPassVersion, byte(len(username))}
+		request = append(request, username...)
+		request = append(request, 1, 'x')
+		if _, err := conn.Write(request); err != nil {
+			t.Fatalf("write credentials: %v", err)
+		}
+		authReply := make([]byte, 2)
+		if _, err := io.ReadFull(conn, authReply); err != nil {
+			t.Fatalf("read auth reply: %v", err)
+		}
+		return authReply[1]
+	}
+
+	if status := negotiate(""); status == 0x00 {
+		t.Error("a request with no directives was accepted")
+	}
+	if status := negotiate("cc=jp"); status != 0x00 {
+		t.Errorf("a request carrying cc=jp was rejected with status 0x%02x", status)
 	}
 }

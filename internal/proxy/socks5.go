@@ -95,7 +95,14 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 
 	pol, err := s.negotiate(client)
 	if err != nil {
-		log.Debug("negotiation failed", slog.Any("error", err))
+		// SOCKS5 has no way to explain a rejection to the client, so a policy
+		// refusal has to be visible to the operator instead: it almost always means
+		// a caller dropped its credentials rather than an attack.
+		if errors.Is(err, errPolicyRequired) {
+			log.Warn("rejected: no selection policy supplied", slog.Any("error", err))
+		} else {
+			log.Debug("negotiation failed", slog.Any("error", err))
+		}
 		return
 	}
 
