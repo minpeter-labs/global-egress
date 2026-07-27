@@ -12,7 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"sort"
@@ -66,10 +66,14 @@ type Options struct {
 	NewTunnelBudget int
 	// NewTunnelWindow is the period NewTunnelBudget applies to.
 	NewTunnelWindow time.Duration
-	// EntryExploreRate is the probability of trying the second-best entry
-	// instead of the best one, so alternatives keep being measured. Zero means
-	// always use the best known entry.
+	// EntryExploreRate is the probability of trying the second-best entry instead
+	// of the best one, so alternatives keep being measured. Zero selects the
+	// default; use DisableEntryExploration to turn it off.
 	EntryExploreRate float64
+	// DisableEntryExploration pins selection to the best known entry. Useful for
+	// reproducible tests and for operators who prefer stable routing over
+	// self-correcting routing.
+	DisableEntryExploration bool
 	// IPCheckURL returns the caller's public address. Empty disables IP checks,
 	// which also disables unique-IP guarantees.
 	IPCheckURL string
@@ -108,8 +112,13 @@ func (o *Options) applyDefaults() {
 	if o.NewTunnelWindow <= 0 {
 		o.NewTunnelWindow = 10 * time.Minute
 	}
+	// A negative rate cannot be expressed as "off" here, because zero has to mean
+	// "use the default"; DisableEntryExploration is the explicit switch.
 	if o.EntryExploreRate <= 0 {
 		o.EntryExploreRate = 0.1
+	}
+	if o.DisableEntryExploration {
+		o.EntryExploreRate = 0
 	}
 	if o.IPCheckTimeout <= 0 {
 		o.IPCheckTimeout = 15 * time.Second
@@ -188,6 +197,18 @@ type Pool struct {
 	// opens holds the timestamps of recent tunnel openings, newest last, pruned
 	// to NewTunnelWindow.
 	opens []time.Time
+	// closing is set by Close so background work stops starting.
+	closing bool
+
+	// baseCtx is cancelled by Close. Background work such as public-IP checks
+	// derives from it, so a shutdown does not leave requests in flight against
+	// tunnels that are being torn down. Holding a context in a struct is a
+	// deliberate exception, justified the same way http.Server justifies
+	// BaseContext: the object has an explicit lifetime ended by Close.
+	baseCtx   context.Context
+	cancelAll context.CancelFunc
+	// wg tracks every goroutine the pool owns, so Close can wait for them.
+	wg sync.WaitGroup
 
 	// counters, protected by mu
 	statAcquired uint64
@@ -226,10 +247,15 @@ func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, er
 
 	rng := opts.Rand
 	if rng == nil {
-		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+		// math/rand/v2 seeds itself from the runtime, so there is nothing to seed
+		// here; a fresh generator only exists so tests can substitute their own.
+		rng = rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 	}
 
+	baseCtx, cancelAll := context.WithCancel(context.Background())
 	p := &Pool{
+		baseCtx:    baseCtx,
+		cancelAll:  cancelAll,
 		opts:       opts,
 		log:        opts.Logger,
 		ipCheckSem: make(chan struct{}, opts.IPCheckConcurrency),
@@ -407,7 +433,7 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 		}
 	}
 	if len(open) > 0 {
-		return open[p.rng.Intn(len(open))], false, nil
+		return open[p.rng.IntN(len(open))], false, nil
 	}
 
 	// Nothing open matches, so we must open one. Respect both budgets: how many
@@ -418,7 +444,7 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 	if err := p.reserveCapacityLocked(); err != nil {
 		return nil, false, err
 	}
-	return candidates[p.rng.Intn(len(candidates))], false, nil
+	return candidates[p.rng.IntN(len(candidates))], false, nil
 }
 
 // eligibleLocked applies every filter that can be evaluated without I/O.
@@ -504,11 +530,15 @@ func (p *Pool) closeLocked(state *slotState, reason string) {
 	tunnel := state.tunnel
 	state.tunnel = nil
 	state.openedAt = time.Time{}
-	p.log.Debug("closing tunnel", slog.String("slot", state.spec.ID), slog.String("reason", reason))
-	// Close off the lock: device teardown joins goroutines.
+	id := state.spec.ID
+	p.log.Debug("closing tunnel", slog.String("slot", id), slog.String("reason", reason))
+	// Tear down off the lock, because a device close joins its own goroutines.
+	// Registered with the WaitGroup so Close can wait for it.
+	p.wg.Add(1)
 	go func() {
+		defer p.wg.Done()
 		if err := tunnel.Close(); err != nil {
-			p.log.Warn("tunnel close failed", slog.String("slot", state.spec.ID), slog.Any("error", err))
+			p.log.Warn("tunnel close failed", slog.String("slot", id), slog.Any("error", err))
 		}
 	}()
 }
@@ -924,14 +954,43 @@ func (p *Pool) warmupEntries(ctx context.Context) int {
 	return opened
 }
 
-// Close tears down every tunnel.
+// Close tears down every tunnel and waits for the pool's own goroutines to
+// finish. It is safe to call more than once.
 func (p *Pool) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if p.closing {
+		p.mu.Unlock()
+		return
+	}
+	p.closing = true
 	for _, state := range p.slots {
 		p.closeLocked(state, "shutdown")
 	}
 	p.closeEntriesLocked("shutdown")
+	p.mu.Unlock()
+
+	// Cancel in-flight background work, such as public-IP measurements, before
+	// waiting: otherwise a check with a long timeout would hold up shutdown.
+	p.cancelAll()
+	p.wg.Wait()
+}
+
+// background runs fn in a goroutine the pool owns, so Close can wait for it. It
+// reports false if the pool is already closing, in which case fn does not run.
+func (p *Pool) background(fn func()) bool {
+	p.mu.Lock()
+	if p.closing {
+		p.mu.Unlock()
+		return false
+	}
+	p.wg.Add(1)
+	p.mu.Unlock()
+
+	go func() {
+		defer p.wg.Done()
+		fn()
+	}()
+	return true
 }
 
 // expireLocked drops stale sessions, batches and cooldowns.

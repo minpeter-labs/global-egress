@@ -18,6 +18,7 @@ func write(t *testing.T, dir, name, content string) string {
 }
 
 func TestLoadAppliesDefaults(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := write(t, dir, "config.yaml", `
 catalog:
@@ -49,6 +50,7 @@ listen:
 }
 
 func TestLoadReadsSecretFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	write(t, dir, "pw", "  hunter2\n")
 	write(t, dir, "token", "tok3n\n")
@@ -73,6 +75,7 @@ access:
 }
 
 func TestLoadRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := write(t, dir, "config.yaml", `
 catalog:
@@ -86,12 +89,14 @@ poool:
 }
 
 func TestLoadMissingFile(t *testing.T) {
+	t.Parallel()
 	if _, err := Load(filepath.Join(t.TempDir(), "absent.yaml")); err == nil {
 		t.Fatal("expected an error for a missing config file")
 	}
 }
 
 func TestValidate(t *testing.T) {
+	t.Parallel()
 	base := func() Config {
 		cfg := Default()
 		cfg.Catalog.Path = "/tmp/wg"
@@ -111,6 +116,7 @@ func TestValidate(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			cfg := base()
 			mutate(&cfg)
 			if err := cfg.Validate(); err == nil {
@@ -128,6 +134,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestAllowedClientPrefixes(t *testing.T) {
+	t.Parallel()
 	cfg := Default()
 	cfg.Access.AllowedClients = []string{"10.0.0.0/24", " ::1/128 "}
 	prefixes, err := cfg.AllowedClientPrefixes()
@@ -143,6 +150,7 @@ func TestAllowedClientPrefixes(t *testing.T) {
 }
 
 func TestInventoryPathWithoutStateDir(t *testing.T) {
+	t.Parallel()
 	cfg := Default()
 	cfg.StateDir = ""
 	if got := cfg.InventoryPath(); got != "" {

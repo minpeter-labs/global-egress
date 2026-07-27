@@ -11,6 +11,8 @@ Restart=on-failure
 RestartSec=5s
 
 # Tunnels run in userspace, so no NET_ADMIN and no tun device are required.
+# Create the account with deploy/global-egress.sysusers, or by hand:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin global-egress
 User=global-egress
 Group=global-egress
 DynamicUser=no

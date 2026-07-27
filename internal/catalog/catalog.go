@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -453,15 +454,18 @@ func parseAddrList(value string) ([]netip.Addr, error) {
 	return out, nil
 }
 
-// splitHostPort accepts "host:port" and "[v6]:port".
+// splitHostPort validates an endpoint and returns its parts. net.SplitHostPort
+// already handles the bracketed IPv6 form, so this only adds the port check.
 func splitHostPort(value string) (host, port string, err error) {
-	idx := strings.LastIndex(value, ":")
-	if idx <= 0 || idx == len(value)-1 {
-		return "", "", fmt.Errorf("invalid endpoint %q", value)
+	host, port, err = net.SplitHostPort(value)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid endpoint %q: %w", value, err)
 	}
-	host, port = value[:idx], value[idx+1:]
-	host = strings.Trim(host, "[]")
-	if _, convErr := strconv.Atoi(port); convErr != nil {
+	if host == "" {
+		return "", "", fmt.Errorf("invalid endpoint %q: no host", value)
+	}
+	number, convErr := strconv.Atoi(port)
+	if convErr != nil || number < 1 || number > 65535 {
 		return "", "", fmt.Errorf("invalid endpoint port in %q", value)
 	}
 	return host, port, nil

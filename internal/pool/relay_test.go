@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"net/netip"
 	"testing"
 	"time"
@@ -59,10 +59,10 @@ func newRelayPool(t *testing.T, opts Options) *Pool {
 		opts.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if opts.Rand == nil {
-		opts.Rand = rand.New(rand.NewSource(2))
+		opts.Rand = rand.New(rand.NewPCG(2, 2))
 	}
-	// Disable exploration so entry ordering is deterministic in tests.
-	opts.EntryExploreRate = -1
+	// Pin selection to the best entry so ordering assertions are deterministic.
+	opts.DisableEntryExploration = true
 	p, err := NewWithSpecs(SpecsFromRelays(testRelays()), testEntrySlots(), opts)
 	if err != nil {
 		t.Fatalf("NewWithSpecs: %v", err)

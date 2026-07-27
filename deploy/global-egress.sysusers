@@ -1,0 +1,6 @@
+# Install as /usr/lib/sysusers.d/global-egress.conf, or create the account by hand:
+#   useradd --system --no-create-home --shell /usr/sbin/nologin global-egress
+#
+# The service needs no privileges: tunnels run in userspace, so there is no tun
+# device, no NET_ADMIN and no root.
+u global-egress - "global-egress proxy" /nonexistent /usr/sbin/nologin

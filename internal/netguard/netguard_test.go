@@ -7,6 +7,7 @@ import (
 )
 
 func TestDefaultDeniesInternalRanges(t *testing.T) {
+	t.Parallel()
 	guard, err := New(nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -39,6 +40,7 @@ func TestDefaultDeniesInternalRanges(t *testing.T) {
 }
 
 func TestCheckAddrHandlesV4MappedV6(t *testing.T) {
+	t.Parallel()
 	guard, err := New(nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +53,7 @@ func TestCheckAddrHandlesV4MappedV6(t *testing.T) {
 }
 
 func TestCheckHost(t *testing.T) {
+	t.Parallel()
 	guard, err := New(nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +73,7 @@ func TestCheckHost(t *testing.T) {
 }
 
 func TestCheckResolved(t *testing.T) {
+	t.Parallel()
 	guard, err := New(nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +92,7 @@ func TestCheckResolved(t *testing.T) {
 }
 
 func TestPortAllowlist(t *testing.T) {
+	t.Parallel()
 	guard, err := New(nil, []int{80, 443})
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +117,7 @@ func TestPortAllowlist(t *testing.T) {
 }
 
 func TestEmptyDenylistDisablesFiltering(t *testing.T) {
+	t.Parallel()
 	guard, err := New([]string{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +128,7 @@ func TestEmptyDenylistDisablesFiltering(t *testing.T) {
 }
 
 func TestNewRejectsBadCIDR(t *testing.T) {
+	t.Parallel()
 	if _, err := New([]string{"not-a-cidr"}, nil); err == nil {
 		t.Fatal("expected an error for an invalid CIDR")
 	}

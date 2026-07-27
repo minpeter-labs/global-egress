@@ -1,5 +1,9 @@
 # global-egress
 
+[![ci](https://github.com/minpeter-labs/global-egress/actions/workflows/ci.yaml/badge.svg)](https://github.com/minpeter-labs/global-egress/actions/workflows/ci.yaml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/minpeter-labs/global-egress.svg)](https://pkg.go.dev/github.com/minpeter-labs/global-egress)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Give it a WireGuard configuration bundle, get a rotating egress proxy.
 
 `global-egress` reads a provider bundle such as Mullvad's "all servers" zip and
@@ -265,6 +269,31 @@ make lint    # golangci-lint
 make check   # formatting (gofumpt + goimports), vet, lint, tests
 make run     # run with config.local.yaml
 ```
+
+## Deployment
+
+```sh
+# Create the unprivileged account the unit runs as.
+install -m 0644 deploy/global-egress.sysusers /usr/lib/sysusers.d/global-egress.conf
+systemd-sysusers
+
+install -m 0755 global-egress /usr/local/bin/
+install -m 0644 deploy/global-egress.service /etc/systemd/system/
+install -d -m 0750 -o root -g global-egress /etc/global-egress
+install -m 0640 -o root -g global-egress deploy/config.example.yaml /etc/global-egress/config.yaml
+
+systemctl daemon-reload
+systemctl enable --now global-egress
+```
+
+The unit needs no capabilities: tunnels run in userspace, so there is no tun
+device, no `NET_ADMIN` and no root.
+
+## Security
+
+Bind the listeners to an internal address and set `access.allowed_clients`. See
+[SECURITY.md](SECURITY.md) for the threat model and for how key material is
+handled.
 
 ## License
 

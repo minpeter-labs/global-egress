@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -49,7 +49,7 @@ func newTestPool(t *testing.T, opts Options) *Pool {
 		opts.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if opts.Rand == nil {
-		opts.Rand = rand.New(rand.NewSource(1))
+		opts.Rand = rand.New(rand.NewPCG(1, 1))
 	}
 	p, err := New(testBundle(t), opts)
 	if err != nil {

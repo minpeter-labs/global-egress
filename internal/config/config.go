@@ -129,6 +129,13 @@ type PoolConfig struct {
 	NewTunnelsPerWindow int `yaml:"new_tunnels_per_window"`
 	// NewTunnelWindow is the period NewTunnelsPerWindow applies to.
 	NewTunnelWindow time.Duration `yaml:"new_tunnel_window"`
+	// EntryExploreRate is the share of requests that deliberately use the
+	// second-best entry, so alternatives keep being measured. Zero uses the
+	// built-in default.
+	EntryExploreRate float64 `yaml:"entry_explore_rate"`
+	// StableEntryRouting always uses the best known entry, trading self-correcting
+	// routing for predictability.
+	StableEntryRouting bool `yaml:"stable_entry_routing"`
 	// DialTimeout bounds connecting to the destination through a tunnel.
 	DialTimeout time.Duration `yaml:"dial_timeout"`
 	// RelayIdleTimeout closes relayed connections after inactivity.
@@ -277,6 +284,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Pool.Preopen < 0 {
 		return fmt.Errorf("config: pool.preopen must not be negative")
+	}
+	if c.Pool.EntryExploreRate < 0 || c.Pool.EntryExploreRate >= 1 {
+		return fmt.Errorf("config: pool.entry_explore_rate must be in [0, 1)")
 	}
 	if c.Pool.NewTunnelsPerWindow < 0 {
 		return fmt.Errorf("config: pool.new_tunnels_per_window must not be negative")

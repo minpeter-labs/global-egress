@@ -21,6 +21,7 @@ Endpoint = 198.51.100.2:51820
 `
 
 func TestParseConf(t *testing.T) {
+	t.Parallel()
 	slot, err := ParseConf("us-lax-wg-001.conf", []byte(sampleConf))
 	if err != nil {
 		t.Fatalf("ParseConf: %v", err)
@@ -59,6 +60,7 @@ func TestParseConf(t *testing.T) {
 }
 
 func TestParseConfDefaultsAllowedIPs(t *testing.T) {
+	t.Parallel()
 	conf := `[Interface]
 PrivateKey = R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=
 Address = 10.64.0.2/32
@@ -77,6 +79,7 @@ Endpoint = 198.51.100.7:51820
 }
 
 func TestParseConfRejectsIncomplete(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"no private key": "[Interface]\nAddress = 10.0.0.1/32\n[Peer]\nPublicKey = k\nEndpoint = 1.2.3.4:1\n",
 		"no address":     "[Interface]\nPrivateKey = k\n[Peer]\nPublicKey = k\nEndpoint = 1.2.3.4:1\n",
@@ -85,6 +88,7 @@ func TestParseConfRejectsIncomplete(t *testing.T) {
 	}
 	for name, conf := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := ParseConf("x-yyy-wg-001.conf", []byte(conf)); err == nil {
 				t.Fatal("expected an error")
 			}
@@ -93,6 +97,7 @@ func TestParseConfRejectsIncomplete(t *testing.T) {
 }
 
 func TestParseConfIgnoresInlineComments(t *testing.T) {
+	t.Parallel()
 	conf := `[Interface]
 PrivateKey = R0xPQkFMLUVHUkVTUy1URVNULUtFWS1OT1QtUkVBTCE=
 Address = 10.64.0.2/32
@@ -113,6 +118,7 @@ AllowedIPs = 0.0.0.0/0
 }
 
 func TestLoadDirAndZip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	names := []string{"us-lax-wg-001.conf", "jp-tyo-wg-001.conf", "notes.txt"}
 	for _, name := range names {
@@ -184,6 +190,7 @@ func TestLoadDirAndZip(t *testing.T) {
 }
 
 func TestLoadDirRejectsDuplicateIDs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "us-lax-wg-001.conf"), []byte(sampleConf), 0o600); err != nil {
 		t.Fatal(err)
@@ -197,6 +204,7 @@ func TestLoadDirRejectsDuplicateIDs(t *testing.T) {
 }
 
 func TestLoadEmptyDir(t *testing.T) {
+	t.Parallel()
 	if _, err := LoadDir(t.TempDir()); err == nil {
 		t.Fatal("expected an error for a directory with no .conf files")
 	}

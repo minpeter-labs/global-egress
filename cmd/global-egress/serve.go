@@ -68,21 +68,24 @@ func runServe(ctx context.Context, args []string) error {
 	}
 
 	egressPool, err := pool.NewWithSpecs(specs, entrySlots, pool.Options{
-		MaxActive:          cfg.Pool.MaxActive,
-		SessionTTL:         cfg.Pool.SessionTTL,
-		BatchTTL:           cfg.Pool.BatchTTL,
-		Cooldown:           cfg.Pool.Cooldown,
-		IdleTimeout:        cfg.Pool.IdleTimeout,
-		HandshakeTimeout:   cfg.Pool.HandshakeTimeout,
-		DialAttempts:       cfg.Pool.DialAttempts,
-		FailureBackoff:     cfg.Pool.FailureBackoff,
-		NewTunnelBudget:    cfg.Pool.NewTunnelsPerWindow,
-		NewTunnelWindow:    cfg.Pool.NewTunnelWindow,
-		IPCheckURL:         cfg.Pool.IPCheckURL,
-		IPCheckTimeout:     cfg.Pool.IPCheckTimeout,
-		IPRefreshInterval:  cfg.Pool.IPRefreshInterval,
-		IPCheckConcurrency: cfg.Pool.IPCheckConcurrency,
-		Logger:             logger,
+		MaxActive:        cfg.Pool.MaxActive,
+		SessionTTL:       cfg.Pool.SessionTTL,
+		BatchTTL:         cfg.Pool.BatchTTL,
+		Cooldown:         cfg.Pool.Cooldown,
+		IdleTimeout:      cfg.Pool.IdleTimeout,
+		HandshakeTimeout: cfg.Pool.HandshakeTimeout,
+		DialAttempts:     cfg.Pool.DialAttempts,
+		FailureBackoff:   cfg.Pool.FailureBackoff,
+		NewTunnelBudget:  cfg.Pool.NewTunnelsPerWindow,
+		NewTunnelWindow:  cfg.Pool.NewTunnelWindow,
+		EntryExploreRate: cfg.Pool.EntryExploreRate,
+
+		DisableEntryExploration: cfg.Pool.StableEntryRouting,
+		IPCheckURL:              cfg.Pool.IPCheckURL,
+		IPCheckTimeout:          cfg.Pool.IPCheckTimeout,
+		IPRefreshInterval:       cfg.Pool.IPRefreshInterval,
+		IPCheckConcurrency:      cfg.Pool.IPCheckConcurrency,
+		Logger:                  logger,
 	})
 	if err != nil {
 		return err
@@ -158,7 +161,7 @@ func runServe(ctx context.Context, args []string) error {
 			Logger:         logger,
 			AllowedClients: allowedClients,
 			Token:          cfg.Access.ControlToken,
-			Version:        version,
+			Version:        buildVersion(),
 			StartedAt:      startedAt,
 		})
 		server := &http.Server{

@@ -59,7 +59,7 @@ func TestTunnelBudgetWindowRolls(t *testing.T) {
 func TestZeroBudgetMeansUnlimited(t *testing.T) {
 	p := newTestPool(t, Options{NewTunnelBudget: 0})
 	now := time.Now()
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		p.noteTunnelOpen(now)
 	}
 	p.mu.Lock()

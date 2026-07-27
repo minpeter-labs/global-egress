@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseEmptyAndPlainUsername(t *testing.T) {
+	t.Parallel()
 	for _, username := range []string{"", "   ", "someaccount"} {
 		pol, err := Parse(username)
 		if err != nil {
@@ -18,6 +19,7 @@ func TestParseEmptyAndPlainUsername(t *testing.T) {
 }
 
 func TestParseDirectives(t *testing.T) {
+	t.Parallel()
 	pol, err := Parse("cc=JP|us;city=us-lax;sess=job-1;ttl=600;uniq=batch-7;not=1.2.3.4|5.6.7.8")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -50,6 +52,7 @@ func TestParseDirectives(t *testing.T) {
 }
 
 func TestParseTTLAcceptsDuration(t *testing.T) {
+	t.Parallel()
 	pol, err := Parse("ttl=90s")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -60,6 +63,7 @@ func TestParseTTLAcceptsDuration(t *testing.T) {
 }
 
 func TestParseCommaSeparator(t *testing.T) {
+	t.Parallel()
 	pol, err := Parse("cc=de,sess=x")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -70,6 +74,7 @@ func TestParseCommaSeparator(t *testing.T) {
 }
 
 func TestParseRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"unknown directive":    "contry=jp",
 		"empty value":          "cc=",
@@ -82,6 +87,7 @@ func TestParseRejectsBadInput(t *testing.T) {
 	}
 	for name, username := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := Parse(username); err == nil {
 				t.Fatalf("Parse(%q) succeeded, want an error", username)
 			}
@@ -90,6 +96,7 @@ func TestParseRejectsBadInput(t *testing.T) {
 }
 
 func TestParseRejectsOverlongUsername(t *testing.T) {
+	t.Parallel()
 	long := make([]byte, MaxUsernameLen+1)
 	for i := range long {
 		long[i] = 'a'
@@ -101,6 +108,7 @@ func TestParseRejectsOverlongUsername(t *testing.T) {
 }
 
 func TestStringRoundTrips(t *testing.T) {
+	t.Parallel()
 	const input = "cc=jp;sess=job-1;ttl=10m;uniq=b1;not=1.2.3.4"
 	pol, err := Parse(input)
 	if err != nil {
@@ -116,6 +124,7 @@ func TestStringRoundTrips(t *testing.T) {
 }
 
 func TestStringForEmptyPolicy(t *testing.T) {
+	t.Parallel()
 	var pol Policy
 	if got := pol.String(); got != "(any)" {
 		t.Errorf("String() = %q, want (any)", got)

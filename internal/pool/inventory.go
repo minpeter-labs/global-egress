@@ -195,7 +195,7 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 	tunnel := state.tunnel
 	p.mu.Unlock()
 
-	go func() {
+	started := p.background(func() {
 		defer func() {
 			p.mu.Lock()
 			state.ipChecking = false
@@ -207,9 +207,11 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 			defer func() { <-p.ipCheckSem }()
 		case <-time.After(30 * time.Second):
 			return // too much contention; try again on a later acquire
+		case <-p.baseCtx.Done():
+			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), p.opts.IPCheckTimeout)
+		ctx, cancel := context.WithTimeout(p.baseCtx, p.opts.IPCheckTimeout)
 		defer cancel()
 
 		var dialer Dialer = tunnel
@@ -236,7 +238,12 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 			p.log.Info("public IP measured",
 				slog.String("slot", state.spec.ID), slog.String("public_ip", ip.String()))
 		}
-	}()
+	})
+	if !started {
+		p.mu.Lock()
+		state.ipChecking = false
+		p.mu.Unlock()
+	}
 }
 
 // FetchPublicIP asks an echo service for the address a tunnel exits from.

@@ -3,6 +3,7 @@ package georoute
 import "testing"
 
 func TestRegionOf(t *testing.T) {
+	t.Parallel()
 	cases := map[string]Region{
 		"jp": EastAsia, "JP": EastAsia, " jp ": EastAsia,
 		"sg": SouthAsia, "au": Oceania, "de": Europe,
@@ -17,6 +18,7 @@ func TestRegionOf(t *testing.T) {
 }
 
 func TestCostPrefersNearbyEntries(t *testing.T) {
+	t.Parallel()
 	// Reaching a Japanese exit should look cheapest from an Asian entry.
 	fromJP := Cost("jp", "jp")
 	fromSG := Cost("sg", "jp")
@@ -32,6 +34,7 @@ func TestCostPrefersNearbyEntries(t *testing.T) {
 }
 
 func TestCostIsSymmetricEnough(t *testing.T) {
+	t.Parallel()
 	// The matrix is hand written, so guard against gross asymmetry which would
 	// make routing decisions depend on which side we look from.
 	for _, pair := range [][2]string{{"jp", "de"}, {"us", "au"}, {"br", "se"}} {
@@ -43,6 +46,7 @@ func TestCostIsSymmetricEnough(t *testing.T) {
 }
 
 func TestUnknownCountriesGetMiddlingCost(t *testing.T) {
+	t.Parallel()
 	unknown := Cost("zz", "jp")
 	if unknown != unknownCost {
 		t.Errorf("Cost with an unknown country = %d, want %d", unknown, unknownCost)

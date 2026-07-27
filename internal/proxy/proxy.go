@@ -238,13 +238,29 @@ func relay(client, upstream net.Conn, idleTimeout time.Duration) (sent, received
 	return sent, received
 }
 
+// relayBufferSize is the copy chunk for a proxied stream. 32 KiB matches what
+// io.Copy uses and is large enough that the per-read deadline bookkeeping is
+// negligible.
+const relayBufferSize = 32 * 1024
+
+// relayBuffers keeps copy buffers off the heap churn path: a busy proxy opens and
+// closes connections constantly, and each one would otherwise allocate 64 KiB.
+var relayBuffers = sync.Pool{
+	New: func() any {
+		buf := make([]byte, relayBufferSize)
+		return &buf
+	},
+}
+
 // copyWithIdle copies src into dst, resetting a deadline on every successful
 // read so that stalled connections do not accumulate.
 func copyWithIdle(dst, src net.Conn, idleTimeout time.Duration) (int64, error) {
 	if idleTimeout <= 0 {
 		return io.Copy(dst, src)
 	}
-	buf := make([]byte, 32*1024)
+	bufPtr := relayBuffers.Get().(*[]byte)
+	defer relayBuffers.Put(bufPtr)
+	buf := *bufPtr
 	var total int64
 	for {
 		_ = src.SetReadDeadline(time.Now().Add(idleTimeout))

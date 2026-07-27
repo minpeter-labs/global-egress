@@ -17,11 +17,46 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 )
 
-// version is overridden at build time with -ldflags "-X main.version=...".
-var version = "dev"
+// version is set at build time with -ldflags "-X main.version=...". When it is
+// not, buildVersion falls back to the module and VCS data the toolchain embeds,
+// so a plain "go build" or "go install" still reports something useful.
+var version = ""
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	var revision, dirty string
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			if len(setting.Value) > 12 {
+				revision = setting.Value[:12]
+			} else {
+				revision = setting.Value
+			}
+		case "vcs.modified":
+			if setting.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+	if revision == "" {
+		return "dev"
+	}
+	return revision + dirty
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -45,7 +80,7 @@ func main() {
 	case "serve":
 		err = runServe(ctx, os.Args[2:])
 	case "version", "--version", "-v":
-		fmt.Println(version)
+		fmt.Println(buildVersion())
 	case "help", "--help", "-h":
 		usage()
 	default:

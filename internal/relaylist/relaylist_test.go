@@ -26,6 +26,7 @@ const sampleJSON = `[
 ]`
 
 func TestUsableFiltersInactiveAndProxyless(t *testing.T) {
+	t.Parallel()
 	list, err := parse([]byte(sampleJSON))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -47,6 +48,7 @@ func TestUsableFiltersInactiveAndProxyless(t *testing.T) {
 }
 
 func TestRelayAccessors(t *testing.T) {
+	t.Parallel()
 	list, err := parse([]byte(sampleJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +77,7 @@ func TestRelayAccessors(t *testing.T) {
 }
 
 func TestParseRejectsEmpty(t *testing.T) {
+	t.Parallel()
 	if _, err := parse([]byte(`[]`)); err == nil {
 		t.Error("expected an error for an empty list")
 	}
@@ -84,6 +87,7 @@ func TestParseRejectsEmpty(t *testing.T) {
 }
 
 func TestSaveAndLoad(t *testing.T) {
+	t.Parallel()
 	list, err := parse([]byte(sampleJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +109,7 @@ func TestSaveAndLoad(t *testing.T) {
 }
 
 func TestFetch(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(sampleJSON))
@@ -121,6 +126,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestFetchBadStatus(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -131,6 +137,7 @@ func TestFetchBadStatus(t *testing.T) {
 }
 
 func TestLoadOrFetchUsesFreshCache(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "relays.json")
 	if err := os.WriteFile(path, []byte(sampleJSON), 0o644); err != nil {
 		t.Fatal(err)
@@ -149,6 +156,7 @@ func TestLoadOrFetchUsesFreshCache(t *testing.T) {
 }
 
 func TestLoadOrFetchFallsBackToStaleCache(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "relays.json")
 	if err := os.WriteFile(path, []byte(sampleJSON), 0o644); err != nil {
 		t.Fatal(err)
@@ -167,6 +175,7 @@ func TestLoadOrFetchFallsBackToStaleCache(t *testing.T) {
 }
 
 func TestLoadOrFetchNoCacheNoNetwork(t *testing.T) {
+	t.Parallel()
 	_, _, err := LoadOrFetch(context.Background(), "http://127.0.0.1:1",
 		filepath.Join(t.TempDir(), "absent.json"), time.Hour)
 	if err == nil {

@@ -284,7 +284,9 @@ func (p *Pool) closeEntriesLocked(reason string) {
 		entry.tunnel = nil
 		id := entry.spec.ID
 		p.log.Debug("closing entry tunnel", slog.String("entry", id), slog.String("reason", reason))
+		p.wg.Add(1)
 		go func() {
+			defer p.wg.Done()
 			if err := tunnel.Close(); err != nil {
 				p.log.Warn("entry close failed", slog.String("entry", id), slog.Any("error", err))
 			}
