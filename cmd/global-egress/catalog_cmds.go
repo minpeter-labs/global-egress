@@ -132,7 +132,9 @@ func runProbe(ctx context.Context, args []string) error {
 	path := fs.String("catalog", "", "catalog directory or .zip bundle")
 	statePath := fs.String("state", "", "inventory file to update (optional)")
 	url := fs.String("url", "https://am.i.mullvad.net/ip", "echo endpoint returning the caller's public IP")
-	concurrency := fs.Int("concurrency", 8, "simultaneous tunnels")
+	concurrency := fs.Int("concurrency", 6,
+		"simultaneous measurements; in relay-socks mode this contends on the entry serving that "+
+			"region, so above ~6 whole regions start failing spuriously")
 	interval := fs.Duration("interval", 0,
 		"minimum spacing between tunnel setups; providers rate-limit handshakes per key, "+
 			"so use e.g. 750ms when sweeping a large bundle")

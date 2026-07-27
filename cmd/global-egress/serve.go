@@ -94,6 +94,7 @@ func runServe(ctx context.Context, args []string) error {
 		AllowedClients: allowedClients,
 		Password:       cfg.Access.Password,
 		RequireAuth:    cfg.Access.RequireAuth,
+		RequirePolicy:  cfg.Access.RequirePolicy,
 		DialTimeout:    cfg.Pool.DialTimeout,
 		DialAttempts:   cfg.Pool.DialAttempts,
 		IdleTimeout:    cfg.Pool.RelayIdleTimeout,

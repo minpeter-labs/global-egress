@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 
+	"github.com/minpeter-labs/global-egress/internal/policy"
 	"github.com/minpeter-labs/global-egress/internal/pool"
 )
 
@@ -196,5 +200,114 @@ func TestIPString(t *testing.T) {
 	lease.PublicIP = netip.MustParseAddr("203.0.113.4")
 	if got := ipString(lease); got != "203.0.113.4" {
 		t.Errorf("ipString = %q", got)
+	}
+}
+
+func TestRequirePolicyRejectsDirectivelessRequests(t *testing.T) {
+	// The directives ride in the proxy username. Clients that drop the credentials
+	// when the password is empty still get a working response from an arbitrary
+	// exit, which is indistinguishable from success. RequirePolicy makes that loud.
+	deps := &Deps{RequirePolicy: true}
+
+	if _, err := deps.authorize("", "", false); !errors.Is(err, errPolicyRequired) {
+		t.Errorf("no credentials: error = %v, want errPolicyRequired", err)
+	}
+	if _, err := deps.authorize("someaccount", "pw", true); !errors.Is(err, errPolicyRequired) {
+		t.Errorf("credentials without directives: error = %v, want errPolicyRequired", err)
+	}
+	if _, err := deps.authorize("cc=jp", "x", true); err != nil {
+		t.Errorf("a real policy was rejected: %v", err)
+	}
+}
+
+func TestRequirePolicyOffKeepsTheDefaultBehaviour(t *testing.T) {
+	deps := &Deps{}
+	pol, err := deps.authorize("", "", false)
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	if !pol.IsZero() {
+		t.Error("expected an unconstrained policy")
+	}
+}
+
+func TestEgressHeadersReportTheAppliedPolicy(t *testing.T) {
+	// A client cannot otherwise tell that its directives were dropped in transit.
+	lease := &pool.Lease{Slot: pool.Spec{ID: "jp-tyo-wg-socks5-001", Country: "jp", City: "jp-tyo"}}
+
+	pol, err := policy.Parse("cc=jp;sess=job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := egressHeaders(lease, pol)
+	if got := headers["X-Egress-Policy"]; got != "cc=jp;sess=job-1" {
+		t.Errorf("X-Egress-Policy = %q", got)
+	}
+
+	// And the empty case has to be visible too, not absent.
+	headers = egressHeaders(lease, policy.Policy{})
+	if got := headers["X-Egress-Policy"]; got != "(any)" {
+		t.Errorf("X-Egress-Policy for an empty policy = %q, want (any)", got)
+	}
+}
+
+// TestSOCKS5RejectsWhenPolicyRequired covers the protocol that has no header to fall
+// back on: for SOCKS5 the refusal is the only thing standing between a caller that
+// dropped its credentials and a silently wrong exit.
+func TestSOCKS5RejectsWhenPolicyRequired(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	// Pool is nil on purpose: the rejection must happen during negotiation, before
+	// anything tries to select an exit.
+	server := NewSOCKS5(Deps{
+		RequirePolicy: true,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = server.Serve(ctx, listener) }()
+
+	negotiate := func(username string) byte {
+		conn, err := net.DialTimeout("tcp", listener.Addr().String(), 3*time.Second)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+
+		// Offer username/password, which is how a policy would be carried.
+		if _, err := conn.Write([]byte{socksVersion, 1, methodUserPass}); err != nil {
+			t.Fatalf("write greeting: %v", err)
+		}
+		reply := make([]byte, 2)
+		if _, err := io.ReadFull(conn, reply); err != nil {
+			t.Fatalf("read greeting reply: %v", err)
+		}
+		if reply[1] != methodUserPass {
+			t.Fatalf("server chose method 0x%02x, want username/password", reply[1])
+		}
+
+		request := []byte{userPassVersion, byte(len(username))}
+		request = append(request, username...)
+		request = append(request, 1, 'x')
+		if _, err := conn.Write(request); err != nil {
+			t.Fatalf("write credentials: %v", err)
+		}
+		authReply := make([]byte, 2)
+		if _, err := io.ReadFull(conn, authReply); err != nil {
+			t.Fatalf("read auth reply: %v", err)
+		}
+		return authReply[1]
+	}
+
+	if status := negotiate(""); status == 0x00 {
+		t.Error("a request with no directives was accepted")
+	}
+	if status := negotiate("cc=jp"); status != 0x00 {
+		t.Errorf("a request carrying cc=jp was rejected with status 0x%02x", status)
 	}
 }

@@ -163,14 +163,50 @@ Directives are separated by `;` or `,`. An empty username means "no constraints"
 The password is a single optional shared secret (`access.password`), not an
 identity.
 
+### Always give a password, even a dummy one
+
+The directives ride in the proxy **username**, so the client has to actually send
+credentials. Several clients quietly drop them when the password is empty, and the
+request then succeeds from an arbitrary exit — no error, no warning, just the wrong
+country. Measured against this proxy, asking three times for `cc=jp`:
+
+| Form | curl | Python `requests` / `urllib` |
+|---|---|---|
+| `cc=jp:x` | Japan ×3 | Japan ×3 |
+| `cc=jp:` (empty password) | Japan ×3 | **Sweden, Israel, USA** |
+| `cc=jp` (no colon) | prompts for a password | **Thailand, USA, Sweden** |
+
+So write `cc=jp:x`. Any non-empty password works; nothing checks it unless
+`access.password` is set.
+
+Two things help catch the mistake anyway:
+
+- **`X-Egress-Policy`** reports the policy the server actually parsed, so `(any)`
+  where you expected `cc=jp` is visible. Note where it is visible: on plain `http://`
+  responses, and on the `CONNECT` response for `https://`. It is *not* inside the
+  encrypted response, so most HTTPS clients will not surface it — `curl -x … -D -`
+  will.
+- **`access.require_policy: true`** refuses directiveless requests outright, which is
+  the safeguard that works regardless of protocol:
+
+  ```text
+  407 Proxy Authentication Required
+  no selection policy supplied: put the directives in the proxy username and give a
+  non-empty password, e.g. "cc=jp:x". Several clients drop the credentials entirely
+  when the password is empty.
+  ```
+
+  Turn it on wherever an unnoticed fallback to a random exit would be a bug.
+
 Every response reports the egress that served it:
 
 ```text
-X-Egress-Slot: jp-tyo-wg-001
+X-Egress-Slot: jp-tyo-wg-socks5-001
 X-Egress-Country: jp
 X-Egress-City: jp-tyo
 X-Egress-IP: 203.0.113.7
 X-Egress-Session: job-1
+X-Egress-Policy: cc=jp;sess=job-1
 ```
 
 ### Rotating when a site blocks you
@@ -296,6 +332,14 @@ your provider's terms for how many simultaneous connections one device may make.
 See [`deploy/config.example.yaml`](deploy/config.example.yaml). Every field is
 documented there.
 
+## Operations
+
+[`docs/operations.md`](docs/operations.md) covers the parts that only show up once
+this is actually running: choosing entry tunnels for your location, testing entry
+failover, building the exit inventory without tripping provider limits, and the
+failure modes worth recognising. [`docs/capacity.md`](docs/capacity.md) has the
+measurements behind the design.
+
 ## Requirements
 
 - Go 1.25.12 or newer (the minor version comes from `golang.org/x/net` and
@@ -341,6 +385,33 @@ The one panel to watch over time is guest memory: userspace tunnels cost about
 Systemd hosts use [`deploy/global-egress.service`](deploy/global-egress.service);
 Alpine/OpenRC guests use [`deploy/openrc/global-egress`](deploy/openrc/global-egress)
 and [`deploy/collector/global-egress-metrics.openrc`](deploy/collector/global-egress-metrics.openrc).
+
+### Alpine / OpenRC
+
+Userspace tunnels need no `/dev/net/tun`, no `NET_ADMIN` and no nesting, so an
+unprivileged container is enough. A 512 MB guest is comfortable.
+
+```sh
+addgroup -S egress && adduser -S -D -H -h /var/lib/global-egress \
+  -s /sbin/nologin -G egress egress
+
+install -m 0755 global-egress /usr/local/bin/
+install -d -m 0750 -o root -g egress /opt/global-egress
+install -m 0640 -o root -g egress bundle.zip config.yaml /opt/global-egress/
+install -d -m 0700 -o egress -g egress /var/lib/global-egress
+
+install -m 0755 deploy/openrc/global-egress /etc/init.d/global-egress
+rc-update add global-egress default && rc-service global-egress start
+```
+
+Updating the binary in place fails with `Text file busy` while the service runs.
+Replace it by rename instead, which is atomic and needs no downtime window:
+
+```sh
+cp global-egress /usr/local/bin/global-egress.new
+mv /usr/local/bin/global-egress.new /usr/local/bin/global-egress
+rc-service global-egress restart
+```
 
 ```sh
 # Create the unprivileged account the unit runs as.

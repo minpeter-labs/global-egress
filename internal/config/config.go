@@ -95,6 +95,11 @@ type AccessConfig struct {
 	PasswordFile string `yaml:"password_file"`
 	// RequireAuth rejects proxy clients that present no credentials.
 	RequireAuth bool `yaml:"require_auth"`
+	// RequirePolicy rejects proxy requests that carry no selection directives.
+	// Useful when every caller is expected to choose a country or a session, and
+	// an unnoticed fallback to an arbitrary exit would be a bug rather than a
+	// convenience.
+	RequirePolicy bool `yaml:"require_policy"`
 	// ControlToken, when set, is required as a Bearer token on the control API.
 	ControlToken string `yaml:"control_token"`
 	// ControlTokenFile reads the control token from a file.
