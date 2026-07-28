@@ -225,6 +225,32 @@ X-Egress-Session: job-1
 X-Egress-Policy: cc=jp;sess=job-1
 ```
 
+### Distinct-exit retry chains
+
+Keep one `uniq=` value for the whole logical operation and change only `sess=`
+between attempts:
+
+```text
+attempt 1: any=1;sess=req-42-a1;uniq=req-42
+attempt 2: any=1;sess=req-42-a2;uniq=req-42
+attempt 3: any=1;sess=req-42-a3;uniq=req-42
+```
+
+The pool records both the selected slot and its measured public IP against the
+batch. Later attempts cannot reuse either one. When every eligible distinct
+exit has been consumed, acquisition fails with `409 Conflict` instead of
+silently returning a duplicate. `not=` remains available for callers that
+already hold an explicit public-IP exclusion list.
+
+For HTTPS, the `X-Egress-*` values are on the successful `CONNECT` response,
+not the encrypted origin response. A custom proxy transport must capture those
+headers before it starts TLS. It can use `X-Egress-IP` as the source-IP quota
+identity without logging or forwarding it to the application response.
+
+`slot=`, `sess=`, and `uniq=` accept only ASCII letters, digits, `.`, `_`, and
+`-`, up to 128 characters. This keeps values safe when they are echoed in
+`CONNECT` response headers.
+
 ### Rotating when a site blocks you
 
 Changing the session name is the simplest rotation. To also make the pool avoid

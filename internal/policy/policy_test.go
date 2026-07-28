@@ -84,6 +84,9 @@ func TestParseRejectsBadInput(t *testing.T) {
 		"negative ttl":         "ttl=-5",
 		"unparsable ttl":       "ttl=soon",
 		"missing key or value": "cc=jp;=x",
+		"unsafe session":       "sess=job\r\nX-Injected: yes",
+		"unsafe unique batch":  "uniq=batch\nx",
+		"unsafe slot":          "slot=entry\rx",
 	}
 	for name, username := range cases {
 		t.Run(name, func(t *testing.T) {

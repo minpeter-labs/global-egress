@@ -107,6 +107,7 @@ func (p Policy) String() string {
 
 // MaxUsernameLen bounds the username we are willing to parse.
 const MaxUsernameLen = 512
+const maxOpaqueTokenLen = 128
 
 // Parse converts a proxy username into a Policy. An empty username yields an
 // unconstrained policy. Unknown directives are rejected so that typos surface
@@ -197,6 +198,15 @@ func parseBool(value string) (bool, error) {
 }
 
 func (p *Policy) validate() error {
+	for name, value := range map[string]string{
+		"session":      p.Session,
+		"slot":         p.Slot,
+		"unique batch": p.UniqueBatch,
+	} {
+		if value != "" && !isSafeOpaqueToken(value) {
+			return fmt.Errorf("policy: %s contains unsafe characters", name)
+		}
+	}
 	for _, cc := range p.Countries {
 		if len(cc) != 2 {
 			return fmt.Errorf("policy: cc=%q is not a 2-letter country code", cc)
@@ -231,6 +241,22 @@ func (p *Policy) validate() error {
 	sort.Strings(p.Countries)
 	sort.Strings(p.Cities)
 	return nil
+}
+
+func isSafeOpaqueToken(value string) bool {
+	if len(value) > maxOpaqueTokenLen {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func appendLower(dst []string, value string) []string {
