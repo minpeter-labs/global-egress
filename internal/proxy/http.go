@@ -152,15 +152,22 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 		return
 	}
 
-	// Anything the client pipelined after CONNECT must be forwarded first.
+	// Anything the client pipelined after CONNECT must be forwarded first. Those
+	// bytes are relayed too, so they belong in the accounting: a client that sends
+	// its TLS hello immediately would otherwise have it silently uncounted.
+	var pipelined int64
 	if buffered != nil && buffered.Reader.Buffered() > 0 {
-		if _, err := io.CopyN(upstream, buffered, int64(buffered.Reader.Buffered())); err != nil {
+		copied, err := io.CopyN(upstream, buffered, int64(buffered.Reader.Buffered()))
+		pipelined = copied
+		if err != nil {
+			s.deps.Pool.RecordTraffic(lease, pipelined, 0)
 			return
 		}
 	}
 
 	started := time.Now()
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
+	sent += pipelined
 	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",
 		slog.String("target", net.JoinHostPort(host, strconv.Itoa(port))),
