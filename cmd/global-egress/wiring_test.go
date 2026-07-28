@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/minpeter-labs/global-egress/internal/config"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/config"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // Every configuration field that limits load has to reach the pool. Twice during

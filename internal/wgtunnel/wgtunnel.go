@@ -23,7 +23,7 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/catalog"
 )
 
 // DefaultKeepalive keeps the peer session and any NAT mapping alive, and makes

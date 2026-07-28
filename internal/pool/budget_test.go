@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/policy"
 )
 
 // The provider restricts how quickly one device key may associate with new

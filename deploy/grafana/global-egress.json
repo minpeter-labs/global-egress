@@ -1010,12 +1010,12 @@
       }
     }
   ],
-  "description": "Rotating egress proxy: entry tunnel health, request and failure rates, exit inventory coverage and guest resources. Ships with github.com/minpeter-labs/global-egress.",
+  "description": "Rotating egress proxy: entry tunnel health, request and failure rates, exit inventory coverage and guest resources. Ships with github.com/minpeter/global-egress.",
   "links": [
     {
       "title": "global-egress on GitHub",
       "type": "link",
-      "url": "https://github.com/minpeter-labs/global-egress",
+      "url": "https://github.com/minpeter/global-egress",
       "icon": "external link",
       "targetBlank": true,
       "tooltip": "",

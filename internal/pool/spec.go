@@ -4,7 +4,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/catalog"
 )
 
 // Dialer is anything that can open a TCP connection, which is all the pool needs

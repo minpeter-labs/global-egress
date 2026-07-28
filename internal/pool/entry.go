@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/georoute"
-	"github.com/minpeter-labs/global-egress/internal/socksdial"
-	"github.com/minpeter-labs/global-egress/internal/wgtunnel"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/georoute"
+	"github.com/minpeter/global-egress/internal/socksdial"
+	"github.com/minpeter/global-egress/internal/wgtunnel"
 )
 
 // entryState is one long-lived WireGuard tunnel used as an entry point for relay

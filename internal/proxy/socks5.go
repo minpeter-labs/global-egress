@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/policy"
 )
 
 // SOCKS5 wire constants.

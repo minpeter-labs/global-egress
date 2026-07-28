@@ -3,7 +3,7 @@
 ## Reporting
 
 Please report suspected vulnerabilities privately through GitHub's
-[security advisories](https://github.com/minpeter-labs/global-egress/security/advisories/new)
+[security advisories](https://github.com/minpeter/global-egress/security/advisories/new)
 rather than in a public issue.
 
 ## What this project handles

@@ -1,4 +1,4 @@
-module github.com/minpeter-labs/global-egress
+module github.com/minpeter/global-egress
 
 go 1.25.12
 

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/policy"
 )
 
 func testExits() []ExitSpec {

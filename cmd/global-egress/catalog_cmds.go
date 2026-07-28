@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/mullvad"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/mullvad"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // runImport extracts a provider bundle into the catalog directory.

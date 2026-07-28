@@ -1,7 +1,7 @@
 # global-egress
 
-[![ci](https://github.com/minpeter-labs/global-egress/actions/workflows/ci.yaml/badge.svg)](https://github.com/minpeter-labs/global-egress/actions/workflows/ci.yaml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/minpeter-labs/global-egress.svg)](https://pkg.go.dev/github.com/minpeter-labs/global-egress)
+[![ci](https://github.com/minpeter/global-egress/actions/workflows/ci.yaml/badge.svg)](https://github.com/minpeter/global-egress/actions/workflows/ci.yaml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/minpeter/global-egress.svg)](https://pkg.go.dev/github.com/minpeter/global-egress)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Mullvad-first, WireGuard-general.** Turn a Mullvad subscription into an internal

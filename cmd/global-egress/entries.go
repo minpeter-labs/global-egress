@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/georoute"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/georoute"
 )
 
 // resolveEntries turns the configured entry names into catalog slots.

@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/config"
-	"github.com/minpeter-labs/global-egress/internal/control"
-	"github.com/minpeter-labs/global-egress/internal/mullvad"
-	"github.com/minpeter-labs/global-egress/internal/netguard"
-	"github.com/minpeter-labs/global-egress/internal/pool"
-	"github.com/minpeter-labs/global-egress/internal/proxy"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/config"
+	"github.com/minpeter/global-egress/internal/control"
+	"github.com/minpeter/global-egress/internal/mullvad"
+	"github.com/minpeter/global-egress/internal/netguard"
+	"github.com/minpeter/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/proxy"
 )
 
 func runServe(ctx context.Context, args []string) error {
