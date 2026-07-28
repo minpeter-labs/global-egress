@@ -248,13 +248,15 @@ type Pool struct {
 	leased int
 
 	// counters, protected by mu
-	statAcquired uint64
-	statBusy     uint64
-	statSent     uint64
-	statReceived uint64
-	statRotated  uint64
-	statReports  uint64
-	statFailures uint64
+	statAcquired          uint64
+	statBusy              uint64
+	statSent              uint64
+	statReceived          uint64
+	statRotated           uint64
+	statReports           uint64
+	statFailures          uint64
+	statAcquiredByCountry map[string]uint64
+	metrics               metricsState
 }
 
 // New builds a pool where every slot owns a WireGuard tunnel.
@@ -294,15 +296,16 @@ func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, er
 
 	baseCtx, cancelAll := context.WithCancel(context.Background())
 	p := &Pool{
-		baseCtx:    baseCtx,
-		cancelAll:  cancelAll,
-		opts:       opts,
-		log:        opts.Logger,
-		ipCheckSem: make(chan struct{}, opts.IPCheckConcurrency),
-		rng:        rng,
-		slots:      make(map[string]*slotState, len(specs)),
-		sessions:   make(map[string]*session),
-		batches:    make(map[string]*batch),
+		baseCtx:               baseCtx,
+		cancelAll:             cancelAll,
+		opts:                  opts,
+		log:                   opts.Logger,
+		ipCheckSem:            make(chan struct{}, opts.IPCheckConcurrency),
+		rng:                   rng,
+		slots:                 make(map[string]*slotState, len(specs)),
+		sessions:              make(map[string]*session),
+		batches:               make(map[string]*batch),
+		statAcquiredByCountry: make(map[string]uint64),
 	}
 	for _, spec := range specs {
 		if _, dup := p.slots[spec.ID]; dup {
@@ -410,7 +413,7 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 		publicIP := state.publicIP
 		p.bindSession(pol, state.ID())
 		p.recordBatch(pol, state, publicIP)
-		p.statAcquired++
+		p.recordAcquisitionLocked(state)
 		p.mu.Unlock()
 
 		p.maybeCheckIP(state)
@@ -431,6 +434,15 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 		return nil, fmt.Errorf("%w: %w", ErrExhausted, lastErr)
 	}
 	return nil, ErrExhausted
+}
+
+func (p *Pool) recordAcquisitionLocked(state *slotState) {
+	country := strings.ToLower(state.spec.Country)
+	if country == "" {
+		country = "unknown"
+	}
+	p.statAcquired++
+	p.statAcquiredByCountry[country]++
 }
 
 // ID returns the slot ID.
@@ -636,7 +648,7 @@ func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunn
 		spec := state.spec.WG
 		p.mu.Unlock()
 
-		tunnel, err := p.openTunnel(ctx, spec)
+		tunnel, err := p.openTunnel(ctx, spec, TunnelRoleDirect)
 
 		p.mu.Lock()
 		state.opening = nil
@@ -685,7 +697,11 @@ func (p *Pool) noteTunnelOpen(now time.Time) {
 	p.opens = append(p.opens, now)
 }
 
-func (p *Pool) openTunnel(ctx context.Context, spec catalog.Slot) (*wgtunnel.Tunnel, error) {
+func (p *Pool) openTunnel(
+	ctx context.Context,
+	spec catalog.Slot,
+	role TunnelRole,
+) (*wgtunnel.Tunnel, error) {
 	// Count the attempt before making it: a failed handshake still contacts the
 	// relay, and that is what the provider's limit reacts to.
 	p.noteTunnelOpen(time.Now())
@@ -696,12 +712,15 @@ func (p *Pool) openTunnel(ctx context.Context, spec catalog.Slot) (*wgtunnel.Tun
 	started := time.Now()
 	tunnel, err := wgtunnel.Open(openCtx, spec, p.log)
 	if err != nil {
+		p.observeTunnelOpen(role, TunnelFailure, time.Since(started))
 		return nil, err
 	}
 	if err := tunnel.WaitHandshake(openCtx); err != nil {
 		_ = tunnel.Close()
+		p.observeTunnelOpen(role, TunnelFailure, time.Since(started))
 		return nil, err
 	}
+	p.observeTunnelOpen(role, TunnelSuccess, time.Since(started))
 	p.log.Info("tunnel up",
 		slog.String("slot", spec.ID),
 		slog.String("endpoint", spec.Endpoint),
@@ -793,6 +812,7 @@ func (p *Pool) RecordTraffic(lease *Lease, sent, received int64) {
 		p.statReceived += uint64(received)
 		lease.state.bytesReceived += uint64(received)
 	}
+	p.recordPayloadLocked(lease, sent, received)
 	if lease.Entry == "" {
 		return
 	}

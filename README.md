@@ -275,6 +275,8 @@ Bound to an internal address, optionally protected by a bearer token.
 | `GET /healthz` | Liveness |
 | `GET /v1/info` | Version, uptime, slot count |
 | `GET /v1/stats` | Open tunnels, unique IPs, sessions, counters |
+| `GET /v1/metrics` | Prometheus request, country, payload, and tunnel lifecycle metrics |
+| `GET /v1/country-acquisitions` | Successful exit selections grouped by country |
 | `GET /v1/slots` | Inventory; filters: `country`, `city`, `open`, `with_ip`, `limit` |
 | `GET /v1/entries` | Entry tunnels and the latency measured through them |
 | `GET /v1/ips` | Distinct measured public IPs |

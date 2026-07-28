@@ -1,6 +1,29 @@
 # Grafana dashboard
 
-`global-egress.json` — UID `global-egress`, title **Global Egress Proxy**, 12 panels.
+`global-egress.json` — UID `global-egress`, title **Global Egress Proxy**, 23 visual panels grouped under 4 section rows.
+
+The layout follows the operator's scan path:
+
+1. **Overview** — service state, request success rate, p95 setup latency, entry availability, and bounded capacity.
+2. **Traffic & routing** — throughput, failure reasons, entry quality, and tunnel setup latency.
+3. **Distribution & inventory** — requested versus selected countries, fallback rate, and exit coverage.
+4. **Workload & host** — sessions, separate CPU and memory trends, network throughput, and scrape health.
+
+## Native visualizations
+
+The dashboard intentionally uses only built-in Grafana panels:
+
+| Visualization | Used for | Why |
+|---|---|---|
+| Stat | service state, success/fallback rates, p95 latency, capacities, and transferred bytes | Immediate state, compact ratios, or cumulative totals |
+| Gauge | entry availability | It has a meaningful 0–100% range and outage thresholds |
+| State timeline | entry tunnel state and collector/scrape health | Binary state duration matters more than line interpolation |
+| Time series | request rates, throughput, sessions, and guest resources | Trends and correlated changes matter |
+| Bar gauge | requested/selected country rankings, failure reasons, entry quality, tunnel latency, and exit inventory | Compact comparison of multiple current categories |
+
+Canvas, geomap, node graph, and status history were not used. They would add
+manual layout, require coordinates or topology data the collector does not
+export, or duplicate the clearer state-timeline view.
 
 It expects two things:
 
@@ -29,7 +52,8 @@ Prometheus renames the collector's copy to `exported_instance` and table joins b
 
 ## Collector
 
-The service exposes JSON, not Prometheus text, so a small loop translates it. See
+The service exposes its detailed request and tunnel metrics as Prometheus text,
+while the collector still translates the existing JSON inventory endpoints. See
 [`../collector/global-egress-collector`](../collector/global-egress-collector).
 
 ```text
@@ -62,6 +86,14 @@ Series it produces:
 | `global_egress_acquisitions`, `global_egress_failures`, `global_egress_rotations`, `global_egress_reports`, `global_egress_refused_busy` | counters |
 | `global_egress_sticky_sessions`, `global_egress_unique_batches` | live policy state |
 | `global_egress_bytes_sent_total`, `global_egress_bytes_received_total` | payload relayed, counted at the proxy |
+| `global_egress_country_acquisitions_total{country}` | successful exit selections by country |
+| `global_egress_request_results_total{result,country,entry}` | completed proxy requests by bounded outcome |
+| `global_egress_request_duration_seconds{result,country,entry}` | request setup duration histogram |
+| `global_egress_requested_country_total{country}`, `global_egress_selected_country_total{country}` | requested policy versus actual selected exit country |
+| `global_egress_country_fallback_total{requested,selected}` | selected country differed from a single requested country |
+| `global_egress_payload_bytes_total{direction,country,entry}` | relayed payload attributed to selected country and entry |
+| `global_egress_tunnel_opens_total{role,result}` | WireGuard entry/direct tunnel open outcomes |
+| `global_egress_tunnel_open_duration_seconds{role,result}` | WireGuard setup and handshake duration histogram |
 | `global_egress_entry_bytes_sent_total{entry,region}`, `..._received_total{entry,region}` | the same, per entry tunnel |
 
 Counting bytes at the proxy rather than at the interface is deliberate: proxied

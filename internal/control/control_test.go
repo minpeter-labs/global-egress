@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/minpeter/global-egress/internal/catalog"
 	"github.com/minpeter/global-egress/internal/pool"
@@ -107,6 +108,50 @@ func TestSlotsFilteringAndLimit(t *testing.T) {
 
 	if rec := do(t, server, http.MethodGet, "/v1/slots?limit=-4", "", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("negative limit status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCountryAcquisitions(t *testing.T) {
+	server, _ := newTestServer(t, Options{})
+	rec := do(t, server, http.MethodGet, "/v1/country-acquisitions", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var payload struct {
+		Countries []pool.CountryAcquisition `json:"countries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Countries) != 0 {
+		t.Errorf("countries = %+v, want no acquisitions yet", payload.Countries)
+	}
+}
+
+func TestMetricsExposition(t *testing.T) {
+	server, egressPool := newTestServer(t, Options{})
+	egressPool.ObserveRequest(pool.RequestObservation{
+		Result:           pool.RequestNoCandidate,
+		RequestedCountry: "jp",
+		Duration:         50 * time.Millisecond,
+	})
+
+	rec := do(t, server, http.MethodGet, "/v1/metrics", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Errorf("content type = %q", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`global_egress_request_results_total{result="no_candidate",country="unknown",entry="none"} 1`,
+		`global_egress_requested_country_total{country="jp"} 1`,
+		`global_egress_request_duration_seconds_count{result="no_candidate",country="unknown",entry="none"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q:\n%s", want, body)
+		}
 	}
 }
 

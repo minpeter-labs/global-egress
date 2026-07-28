@@ -383,3 +383,68 @@ func TestRequirePolicyAcceptsExplicitAny(t *testing.T) {
 		t.Errorf("silence should still be rejected, got %v", err)
 	}
 }
+
+func TestRequestedCountry(t *testing.T) {
+	tests := []struct {
+		name string
+		pol  policy.Policy
+		want string
+	}{
+		{name: "unconstrained", want: "any"},
+		{name: "explicit any", pol: policy.Policy{AnyExit: true}, want: "any"},
+		{name: "one country", pol: policy.Policy{Countries: []string{"JP"}}, want: "jp"},
+		{name: "multiple countries", pol: policy.Policy{Countries: []string{"jp", "us"}}, want: "multiple"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := requestedCountry(tt.pol); got != tt.want {
+				t.Errorf("requestedCountry() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestObserveRequestUsesAppliedPolicy(t *testing.T) {
+	p, err := pool.NewWithSpecs([]pool.Spec{{
+		ID: "relay-1", Kind: pool.KindRelaySocks, SocksAddr: "relay.example:1080",
+	}}, []catalog.Slot{{ID: "entry-1"}}, pool.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	deps := Deps{Pool: p}
+
+	deps.observeRequest(
+		policy.Policy{Countries: []string{"JP"}},
+		nil,
+		pool.RequestNoCandidate,
+		25*time.Millisecond,
+	)
+
+	snapshot := p.Metrics()
+	if len(snapshot.RequestedCountries) != 1 || snapshot.RequestedCountries[0].Country != "jp" {
+		t.Errorf("requested countries = %+v, want jp", snapshot.RequestedCountries)
+	}
+	if len(snapshot.Requests) != 1 || snapshot.Requests[0].Result != pool.RequestNoCandidate {
+		t.Errorf("requests = %+v, want no_candidate", snapshot.Requests)
+	}
+}
+
+func TestRequestResult(t *testing.T) {
+	tests := []struct {
+		err  error
+		want pool.RequestResult
+	}{
+		{err: nil, want: pool.RequestSuccess},
+		{err: pool.ErrBusy, want: pool.RequestBusy},
+		{err: pool.ErrNoCandidate, want: pool.RequestNoCandidate},
+		{err: pool.ErrExhausted, want: pool.RequestNoCandidate},
+		{err: context.DeadlineExceeded, want: pool.RequestTimeout},
+		{err: errors.New("dial failed"), want: pool.RequestDialFailure},
+	}
+	for _, tt := range tests {
+		if got := requestResult(tt.err); got != tt.want {
+			t.Errorf("requestResult(%v) = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+}

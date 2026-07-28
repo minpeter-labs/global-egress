@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // SOCKS5 wire constants.
@@ -113,8 +114,10 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	}
 
 	target := net.JoinHostPort(host, strconv.Itoa(port))
+	started := time.Now()
 	upstream, lease, err := s.deps.connectUpstream(ctx, pol, host, port)
 	if err != nil {
+		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
 			slog.String("target", target),
 			slog.String("policy", pol.String()),
@@ -122,6 +125,7 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 		_ = writeReply(client, replyCodeFor(err), nil)
 		return
 	}
+	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
 	defer lease.Release()
 	defer upstream.Close()
 
@@ -133,7 +137,7 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	// Relaying manages its own deadlines from here on.
 	_ = client.SetDeadline(time.Time{})
 
-	started := time.Now()
+	started = time.Now()
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
 	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",

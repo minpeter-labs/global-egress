@@ -9,7 +9,7 @@ set -u
 # control API binds to the service's own address, not loopback, so there is no
 # useful default beyond documenting the shape.
 CONTROL="${CONTROL:-http://127.0.0.1:8080}"
-OUT_DIR=/var/lib/node_exporter/textfile_collector
+OUT_DIR="${OUT_DIR:-/var/lib/node_exporter/textfile_collector}"
 OUT="$OUT_DIR/global_egress.prom"
 INTERVAL="${INTERVAL:-60}"
 
@@ -39,6 +39,27 @@ emit() {
         esac
         echo "global_egress_$key $value"
       done
+
+    echo '# HELP global_egress_country_acquisitions_total Successful exit selections by country.'
+    echo '# TYPE global_egress_country_acquisitions_total counter'
+    curl -fsS --max-time 8 "$CONTROL/v1/country-acquisitions" 2>/dev/null | awk '
+      /"country":/ {
+        country = $0
+        sub(/.*"country": *"/, "", country)
+        sub(/".*/, "", country)
+      }
+      /"acquisitions":/ && country != "" {
+        acquisitions = $0
+        gsub(/[^0-9]/, "", acquisitions)
+        printf "global_egress_country_acquisitions_total{country=\"%s\"} %s\n", country, acquisitions
+        country = ""
+      }'
+
+    if extended_metrics=$(curl -fsS --max-time 8 "$CONTROL/v1/metrics" 2>/dev/null); then
+      printf '%s\n' "$extended_metrics"
+    else
+      echo '# global-egress extended metrics unavailable'
+    fi
 
     # Entry identity and health. The control API pretty-prints, so walk the fields
     # in order and emit once the object is complete: id and region always precede

@@ -125,6 +125,30 @@ func TestStatsCountsGeography(t *testing.T) {
 	}
 }
 
+func TestCountryAcquisitionsCountSelectedExitCountry(t *testing.T) {
+	p := newTestPool(t, Options{})
+
+	p.mu.Lock()
+	p.recordAcquisitionLocked(p.slots["jp-tyo-wg-001"])
+	p.recordAcquisitionLocked(p.slots["jp-osa-wg-001"])
+	p.recordAcquisitionLocked(p.slots["us-lax-wg-001"])
+	p.mu.Unlock()
+
+	got := p.CountryAcquisitions()
+	if len(got) != 2 {
+		t.Fatalf("CountryAcquisitions() = %+v, want two countries", got)
+	}
+	if got[0].Country != "jp" || got[0].Acquisitions != 2 {
+		t.Errorf("first country = %+v, want jp=2", got[0])
+	}
+	if got[1].Country != "us" || got[1].Acquisitions != 1 {
+		t.Errorf("second country = %+v, want us=1", got[1])
+	}
+	if p.Stats().Acquisitions != 3 {
+		t.Errorf("total acquisitions = %d, want 3", p.Stats().Acquisitions)
+	}
+}
+
 func TestAcquireRejectsImpossiblePolicy(t *testing.T) {
 	p := newTestPool(t, Options{})
 	ctx := context.Background()

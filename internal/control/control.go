@@ -54,6 +54,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/info", s.handleInfo)
 	s.mux.HandleFunc("GET /v1/stats", s.handleStats)
+	s.mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
+	s.mux.HandleFunc("GET /v1/country-acquisitions", s.handleCountryAcquisitions)
 	s.mux.HandleFunc("GET /v1/slots", s.handleSlots)
 	s.mux.HandleFunc("GET /v1/entries", s.handleEntries)
 	s.mux.HandleFunc("GET /v1/ips", s.handleIPs)
@@ -123,6 +125,14 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.opts.Pool.Stats())
+}
+
+func (s *Server) handleCountryAcquisitions(w http.ResponseWriter, _ *http.Request) {
+	countries := s.opts.Pool.CountryAcquisitions()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":     len(countries),
+		"countries": countries,
+	})
 }
 
 func (s *Server) handleSlots(w http.ResponseWriter, r *http.Request) {

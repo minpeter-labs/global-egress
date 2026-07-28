@@ -136,6 +136,33 @@ type Stats struct {
 	BytesReceivedTotal uint64 `json:"bytes_received_total"`
 }
 
+// CountryAcquisition is the number of selected exits attributed to one country.
+type CountryAcquisition struct {
+	Country      string `json:"country"`
+	Acquisitions uint64 `json:"acquisitions"`
+}
+
+// CountryAcquisitions returns successful exit selections grouped by country.
+func (p *Pool) CountryAcquisitions() []CountryAcquisition {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	countries := make([]string, 0, len(p.statAcquiredByCountry))
+	for country := range p.statAcquiredByCountry {
+		countries = append(countries, country)
+	}
+	sort.Strings(countries)
+
+	out := make([]CountryAcquisition, 0, len(countries))
+	for _, country := range countries {
+		out = append(out, CountryAcquisition{
+			Country:      country,
+			Acquisitions: p.statAcquiredByCountry[country],
+		})
+	}
+	return out
+}
+
 // Stats returns a snapshot of counters and derived inventory numbers.
 func (p *Pool) Stats() Stats {
 	p.mu.Lock()
@@ -674,7 +701,7 @@ func (p *Pool) probeDialer(ctx context.Context, state *slotState) (Dialer, func(
 		dialer, _, err := p.dialerForSocksSlot(ctx, state)
 		return dialer, nil, err
 	}
-	tunnel, err := p.openTunnel(ctx, state.spec.WG)
+	tunnel, err := p.openTunnel(ctx, state.spec.WG, TunnelRoleDirect)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 16,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -54,15 +54,28 @@
   },
   "panels": [
     {
-      "id": 1,
-      "type": "stat",
-      "title": "Service",
-      "description": "1 when the control API answers. Everything else on this dashboard comes from it, so a 0 here explains any other gap.",
+      "id": 30,
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "panels": [],
       "gridPos": {
-        "h": 4,
-        "w": 4,
+        "h": 1,
+        "w": 24,
         "x": 0,
         "y": 0
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Status",
+      "description": "DOWN when the control API is unavailable, DEGRADED when success rate is below 99% or p95 setup latency exceeds one second.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 1
       },
       "datasource": {
         "type": "prometheus",
@@ -74,7 +87,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "global_egress_up{job=\"$job\"}",
+          "expr": "global_egress_up{job=\"$job\"} * scalar(1 + clamp_max(((100 * sum(global_egress_request_results_total{job=\"$job\",result=\"success\"}) / clamp_min(sum(global_egress_request_results_total{job=\"$job\"}), 1) < bool 99) * (sum(global_egress_request_results_total{job=\"$job\"}) > bool 0)) + ((histogram_quantile(0.95, sum by (le) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"})) or vector(0)) > bool 1), 1))",
           "refId": "A",
           "legendFormat": "up"
         }
@@ -94,9 +107,9 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            {
-              "type": "value",
-              "options": {
+          {
+            "type": "value",
+            "options": {
                 "0": {
                   "text": "DOWN",
                   "color": "red",
@@ -107,6 +120,440 @@
             {
               "type": "value",
               "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                "index": 1
+              }
+            }
+          },
+          {
+            "type": "value",
+            "options": {
+              "2": {
+                "text": "DEGRADED",
+                "color": "orange",
+                "index": 2
+              }
+            }
+          }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+            {
+              "color": "green",
+              "value": 1
+            },
+            {
+              "color": "orange",
+              "value": 2
+            }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Success rate",
+      "description": "Share of proxy requests that reached an upstream successfully since the service last started.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * sum(global_egress_request_results_total{job=\"$job\",result=\"success\"}) / clamp_min(sum(global_egress_request_results_total{job=\"$job\"}), 1)",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "success"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 setup latency",
+      "description": "Process-lifetime 95th percentile time from an accepted proxy request until its upstream connection or response headers are ready.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"}))",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "p95"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 2,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Entry health",
+      "description": "WireGuard entry tunnels currently established. Every request travels through one of these; all three down means a total outage.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * global_egress_entries_open{job=\"$job\"} / global_egress_entries{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "availability"
+        }
+      ],
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 67
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Connections",
+      "description": "Active leases and the pool-wide connection cap. Requests over the cap are refused with 503.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_active_leases{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "active"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_max_concurrent_conns{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "B",
+          "legendFormat": "cap"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "stat",
+      "title": "Tunnel budget",
+      "description": "New WireGuard tunnels opened in the provider rate window and the configured budget.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_new_tunnels_used{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "used"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_new_tunnel_budget{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "B",
+          "legendFormat": "budget"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 31,
+      "type": "row",
+      "title": "Traffic & routing",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      }
+    },
+    {
+      "id": 6,
+      "type": "state-timeline",
+      "title": "Entry tunnel state",
+      "description": "Per-entry availability. A drop to 0 that recovers on its own is the pool detecting a dead entry, taking it out of rotation, and re-establishing it.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_entry_open{job=\"$job\",entry=~\".*[A-Za-z0-9].*\"}",
+          "refId": "A",
+          "legendFormat": "{{entry}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 70,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
                 "1": {
                   "text": "UP",
                   "color": "green",
@@ -130,302 +577,20 @@
           }
         },
         "overrides": []
-      }
-    },
-    {
-      "id": 2,
-      "type": "stat",
-      "title": "Entries open",
-      "description": "WireGuard entry tunnels currently established. Every request travels through one of these; all three down means a total outage.",
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_entries_open{job=\"$job\"}",
-          "refId": "A",
-          "legendFormat": "open"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_entries{job=\"$job\"}",
-          "refId": "B",
-          "legendFormat": "configured"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "green",
-                "value": 2
-              }
-            ]
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Unique exit IPs known",
-      "description": "Distinct public addresses measured so far. The catalogue holds ~530 exits; this grows as they are used, and is what uniq= batches are enforced against.",
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 8,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_unique_public_ips{job=\"$job\"}",
-          "refId": "A",
-          "legendFormat": "unique IPs"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_slots{job=\"$job\"}",
-          "refId": "B",
-          "legendFormat": "exits in catalogue"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Active connections",
-      "description": "Leases in flight, against the pool-wide cap. Requests over the cap are refused with 503 and counted below.",
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 13,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_active_leases{job=\"$job\"}",
-          "refId": "A",
-          "legendFormat": "active"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_max_concurrent_conns{job=\"$job\"}",
-          "refId": "B",
-          "legendFormat": "cap"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Key associations used",
-      "description": "New WireGuard tunnels opened in the current rate window. This is the number the provider rate-limits; in relay-socks mode it should sit at the entry count and stay there.",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_new_tunnels_used{job=\"$job\"}",
-          "refId": "A",
-          "legendFormat": "used"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_new_tunnel_budget{job=\"$job\"}",
-          "refId": "B",
-          "legendFormat": "budget"
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "none",
-        "graphMode": "area"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Entry tunnel state",
-      "description": "Per-entry availability. A drop to 0 that recovers on its own is the pool detecting a dead entry, taking it out of rotation, and re-establishing it.",
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 4
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "global_egress_entry_open{job=\"$job\"}",
-          "refId": "A",
-          "legendFormat": "{{entry}} ({{region}})"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "min": 0,
-          "max": 1,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "fillOpacity": 20,
-            "lineWidth": 2
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "down"
-                },
-                "1": {
-                  "text": "up"
-                }
-              }
-            }
-          ]
-        },
-        "overrides": []
       },
       "options": {
+        "alignValue": "left",
         "legend": {
-          "displayMode": "table",
+          "displayMode": "list",
           "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "min"
-          ]
+          "showLegend": false
+        },
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
         }
       }
     },
@@ -437,8 +602,8 @@
       "gridPos": {
         "h": 7,
         "w": 12,
-        "x": 12,
-        "y": 4
+        "x": 0,
+        "y": 12
       },
       "datasource": {
         "type": "prometheus",
@@ -539,8 +704,8 @@
       "gridPos": {
         "h": 7,
         "w": 6,
-        "x": 0,
-        "y": 11
+        "x": 8,
+        "y": 19
       },
       "datasource": {
         "type": "prometheus",
@@ -595,9 +760,9 @@
       "description": "Payload actually relayed, as opposed to what crosses the guest interface.",
       "gridPos": {
         "h": 7,
-        "w": 10,
-        "x": 6,
-        "y": 11
+        "w": 12,
+        "x": 12,
+        "y": 12
       },
       "datasource": {
         "type": "prometheus",
@@ -649,9 +814,9 @@
       "description": "Which entry is carrying the load. One entry taking everything usually means the others lost their latency race, or that they are failing and being skipped.",
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 11
+        "w": 10,
+        "x": 14,
+        "y": 19
       },
       "datasource": {
         "type": "prometheus",
@@ -663,7 +828,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(global_egress_entry_bytes_received_total{job=\"$job\"}[5m]) * 8",
+          "expr": "rate(global_egress_entry_bytes_received_total{job=\"$job\",entry=~\".*[A-Za-z0-9].*\"}[5m]) * 8",
           "refId": "A",
           "legendFormat": "{{entry}} ({{region}}) down"
         },
@@ -672,7 +837,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(global_egress_entry_bytes_sent_total{job=\"$job\"}[5m]) * 8",
+          "expr": "rate(global_egress_entry_bytes_sent_total{job=\"$job\",entry=~\".*[A-Za-z0-9].*\"}[5m]) * 8",
           "refId": "B",
           "legendFormat": "{{entry}} ({{region}}) up"
         }
@@ -704,15 +869,380 @@
       }
     },
     {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Exit inventory coverage",
-      "description": "How much of the catalogue has a measured exit address. Run `global-egress probe -mode relay-socks` to fill it in one pass instead of waiting for traffic.",
+      "id": 44,
+      "type": "bargauge",
+      "title": "Failure reasons",
+      "description": "Non-successful proxy requests by reason since the service last started.",
       "gridPos": {
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 18
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (result) (global_egress_request_results_total{job=\"$job\",result!=\"success\"})",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 45,
+      "type": "bargauge",
+      "title": "Entry p95 setup latency",
+      "description": "Successful request setup latency by the entry tunnel that carried the request.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, entry) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\",entry!=\"none\"}))",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "{{entry}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 47,
+      "type": "bargauge",
+      "title": "Tunnel setup p95",
+      "description": "WireGuard setup and handshake latency by shared-entry or direct tunnel role.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, role) (global_egress_tunnel_open_duration_seconds_bucket{job=\"$job\",result=\"success\"}))",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "{{role}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 32,
+      "type": "row",
+      "title": "Distribution & inventory",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      }
+    },
+    {
+      "id": 42,
+      "type": "bargauge",
+      "title": "Requested countries",
+      "description": "Top requested country policies since the service last started. any and multiple remain explicit policy categories.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (country) (global_egress_requested_country_total{job=\"$job\"}))",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "{{country}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 23,
+      "type": "bargauge",
+      "title": "Selected exit countries",
+      "description": "Top countries actually selected for proxy requests since the service last started.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(8, sum by (country) (global_egress_selected_country_total{job=\"$job\"}))",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "{{country}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 43,
+      "type": "stat",
+      "title": "Country fallback rate",
+      "description": "Share of requests whose selected exit country differed from the single requested country policy.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 34
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (sum(global_egress_country_fallback_total{job=\"$job\"}) or vector(0)) / clamp_min(sum(global_egress_requested_country_total{job=\"$job\",country!~\"any|multiple\"}), 1)",
+          "instant": true,
+          "range": false,
+          "refId": "A",
+          "legendFormat": "fallback"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Exit inventory",
+      "description": "Catalogue size, measured public IP coverage, and exits currently backed off. Run `global-egress probe -mode relay-socks` to fill missing measurements.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 42
       },
       "datasource": {
         "type": "prometheus",
@@ -725,6 +1255,8 @@
             "uid": "${datasource}"
           },
           "expr": "global_egress_slots{job=\"$job\"}",
+          "instant": true,
+          "range": false,
           "refId": "A",
           "legendFormat": "exits in catalogue"
         },
@@ -734,6 +1266,8 @@
             "uid": "${datasource}"
           },
           "expr": "global_egress_slots_with_known_ip{job=\"$job\"}",
+          "instant": true,
+          "range": false,
           "refId": "B",
           "legendFormat": "measured"
         },
@@ -742,39 +1276,69 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "global_egress_disabled_slots{job=\"$job\"}",
+          "expr": "global_egress_unique_public_ips{job=\"$job\"}",
+          "instant": true,
+          "range": false,
           "refId": "C",
+          "legendFormat": "unique public IPs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_disabled_slots{job=\"$job\"}",
+          "instant": true,
+          "range": false,
+          "refId": "D",
           "legendFormat": "backed off"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2
+          "color": {
+            "mode": "palette-classic"
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 33,
+      "type": "row",
+      "title": "Workload & host",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
       }
     },
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Sessions and unique batches",
+      "title": "Session state",
       "description": "Sticky sessions pin one exit for a client; unique batches remember which addresses they have already used.",
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 18
+        "w": 6,
+        "x": 0,
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -821,13 +1385,13 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Guest CPU and memory (LXC 301)",
-      "description": "Userspace tunnels cost roughly 1.6 MiB each, so memory should stay flat once the entries are up. A slow climb over days is the thing to watch for.",
+      "title": "CPU usage",
+      "description": "Guest CPU consumed by the proxy, userspace WireGuard tunnels, and collector.",
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 18
+        "w": 6,
+        "x": 6,
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -842,15 +1406,6 @@
           "expr": "100 - (avg without(cpu, mode) (rate(node_cpu_seconds_total{job=\"$job\",mode=\"idle\"}[5m])) * 100)",
           "refId": "A",
           "legendFormat": "CPU %"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "(node_memory_MemTotal_bytes{job=\"$job\"} - node_memory_MemAvailable_bytes{job=\"$job\"}) / 1024 / 1024",
-          "refId": "B",
-          "legendFormat": "memory used MiB"
         }
       ],
       "fieldConfig": {
@@ -878,20 +1433,53 @@
                 "value": 100
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "memory used MiB"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "mbytes"
-              }
-            ]
-          }
+      }
         ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 46,
+      "type": "timeseries",
+      "title": "Memory usage",
+      "description": "Guest memory in use. A slow climb after tunnel warmup is the leak signal to investigate.",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 50
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(node_memory_MemTotal_bytes{job=\"$job\"} - node_memory_MemAvailable_bytes{job=\"$job\"}) / 1024 / 1024",
+          "refId": "A",
+          "legendFormat": "memory used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mbytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
       },
       "options": {
         "legend": {
@@ -903,13 +1491,13 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Guest network throughput",
+      "title": "Network I/O",
       "description": "All proxied traffic crosses eth0 twice, once from the client and once inside the tunnel, so expect roughly double the client-visible rate.",
       "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 0,
-        "y": 25
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -956,14 +1544,14 @@
     },
     {
       "id": 12,
-      "type": "timeseries",
+      "type": "state-timeline",
       "title": "Collector and scrape freshness",
       "description": "up is the Prometheus scrape; global_egress_up is the collector reaching the control API. The two disagreeing narrows the fault down immediately.",
       "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 25
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 57
       },
       "datasource": {
         "type": "prometheus",
@@ -977,7 +1565,7 @@
           },
           "expr": "up{job=\"$job\"}",
           "refId": "A",
-          "legendFormat": "node_exporter scrape"
+          "legendFormat": "node scrape"
         },
         {
           "datasource": {
@@ -986,26 +1574,68 @@
           },
           "expr": "global_egress_up{job=\"$job\"}",
           "refId": "B",
-          "legendFormat": "control API reachable"
+          "legendFormat": "control API"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "min": 0,
-          "max": 1,
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "fillOpacity": 20,
-            "lineWidth": 2
+            "fillOpacity": 70,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
+        "alignValue": "left",
         "legend": {
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
         }
       }
     }

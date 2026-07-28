@@ -121,8 +121,10 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 		return
 	}
 
+	started := time.Now()
 	upstream, lease, err := s.deps.connectUpstream(r.Context(), pol, host, port)
 	if err != nil {
+		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
 			slog.String("target", r.Host),
 			slog.String("policy", pol.String()),
@@ -130,6 +132,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 		http.Error(w, err.Error(), statusCodeFor(err))
 		return
 	}
+	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
 	defer lease.Release()
 	defer upstream.Close()
 
@@ -170,7 +173,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 		}
 	}
 
-	started := time.Now()
+	started = time.Now()
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
 	sent += pipelined
 	s.deps.Pool.RecordTraffic(lease, sent, received)
@@ -222,8 +225,10 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		return
 	}
 
+	started := time.Now()
 	lease, err := s.deps.Pool.Acquire(r.Context(), pol, host)
 	if err != nil {
+		s.deps.observeRequest(pol, nil, requestResult(err), time.Since(started))
 		log.Warn("acquire failed", slog.String("policy", pol.String()), slog.Any("error", err))
 		http.Error(w, err.Error(), statusCodeFor(err))
 		return
@@ -264,9 +269,9 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		outbound.Body = &uploaded
 	}
 
-	started := time.Now()
 	resp, err := transport.RoundTrip(outbound)
 	if err != nil {
+		s.deps.observeRequest(pol, lease, upstreamResult(err), time.Since(started))
 		log.Warn("upstream request failed",
 			slog.String("target", r.URL.String()),
 			slog.String("slot", lease.Slot.ID),
@@ -274,6 +279,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
 	defer resp.Body.Close()
 
 	for key, values := range resp.Header {

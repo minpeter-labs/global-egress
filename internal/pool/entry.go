@@ -268,7 +268,7 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 		spec := entry.spec
 		p.mu.Unlock()
 
-		tunnel, err := p.openTunnel(ctx, spec)
+		tunnel, err := p.openTunnel(ctx, spec, TunnelRoleEntry)
 
 		p.mu.Lock()
 		entry.opening = nil
