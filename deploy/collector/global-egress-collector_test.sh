@@ -110,7 +110,7 @@ jq -e '
 ' "$ROOT/deploy/grafana/global-egress.json"
 
 jq -e '
-  .version == 18
+  .version == 19
   and (.panels | length) == 27
   and ([.panels[] | select(.type == "row") | .title] == [
     "Overview",
@@ -134,12 +134,17 @@ jq -e '
   ])
   and (.panels[] | select(.id == 40) | .title == "Tunnel budget" and .gridPos == {"h":5,"w":8,"x":16,"y":6})
   and ([.panels[] | select(.type == "row") | .gridPos.y] == [0, 11, 33, 49])
-  and (.panels[] | select(.id == 2) | .targets[0].expr | contains("global_egress_request_results_total"))
+  and (.panels[] | select(.id == 2) | .targets[0].expr | contains("increase(global_egress_request_results_total"))
+  and (.panels[] | select(.id == 2) | .targets[0].expr | contains("[15m]"))
+  and (.panels[] | select(.id == 2) | .fieldConfig.defaults.thresholds.steps[1].value == 90)
+  and (.panels[] | select(.id == 2) | .fieldConfig.defaults.thresholds.steps[2].value == 99)
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("global_egress_request_results_total"))
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("increase(global_egress_request_results_total"))
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("rate(global_egress_request_duration_seconds_bucket"))
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("[15m]"))
+  and (.panels[] | select(.id == 1) | .targets[0].expr | contains("< bool 90"))
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("> bool 2.5"))
+  and (.panels[] | select(.id == 1) | .description | contains("90%"))
   and (.panels[] | select(.id == 1) | .description | contains("15-minute"))
   and (.panels[] | select(.id == 1) | .description | contains("2.5 seconds"))
   and (.panels[] | select(.id == 1) | .fieldConfig.defaults.mappings[2].options["2"].text == "DEGRADED")
