@@ -33,6 +33,8 @@ type SlotInfo struct {
 	IPCheckedAt *time.Time `json:"ip_checked_at,omitempty"`
 
 	Failures      int        `json:"failures,omitempty"`
+	BytesSent     uint64     `json:"bytes_sent,omitempty"`
+	BytesReceived uint64     `json:"bytes_received,omitempty"`
 	LastError     string     `json:"last_error,omitempty"`
 	DisabledUntil *time.Time `json:"disabled_until,omitempty"`
 	Cooldowns     int        `json:"cooldowns,omitempty"`
@@ -67,16 +69,18 @@ func (p *Pool) Slots(filter SlotFilter) []SlotInfo {
 			continue
 		}
 		info := SlotInfo{
-			ID:        state.spec.ID,
-			Country:   state.spec.Country,
-			City:      state.spec.City,
-			Kind:      state.spec.Kind.String(),
-			Target:    state.spec.Target(),
-			Open:      state.isOpen(),
-			Leases:    state.leases,
-			Failures:  state.failures,
-			LastError: state.lastError,
-			Cooldowns: len(state.cooldowns),
+			ID:            state.spec.ID,
+			Country:       state.spec.Country,
+			City:          state.spec.City,
+			Kind:          state.spec.Kind.String(),
+			Target:        state.spec.Target(),
+			Open:          state.isOpen(),
+			Leases:        state.leases,
+			Failures:      state.failures,
+			LastError:     state.lastError,
+			BytesSent:     state.bytesSent,
+			BytesReceived: state.bytesReceived,
+			Cooldowns:     len(state.cooldowns),
 		}
 		if state.publicIP.IsValid() {
 			info.PublicIP = state.publicIP.String()
@@ -125,6 +129,11 @@ type Stats struct {
 	Rotations       uint64 `json:"rotations"`
 	Reports         uint64 `json:"reports"`
 	Failures        uint64 `json:"failures"`
+	// BytesSentTotal and BytesReceivedTotal are relayed payload bytes, counted at
+	// the proxy. Interface counters see proxied traffic twice, once from the client
+	// and once inside the tunnel, and cannot attribute it to an exit or an entry.
+	BytesSentTotal     uint64 `json:"bytes_sent_total"`
+	BytesReceivedTotal uint64 `json:"bytes_received_total"`
 }
 
 // Stats returns a snapshot of counters and derived inventory numbers.
@@ -150,6 +159,8 @@ func (p *Pool) Stats() Stats {
 		Rotations:          p.statRotated,
 		Reports:            p.statReports,
 		Failures:           p.statFailures,
+		BytesSentTotal:     p.statSent,
+		BytesReceivedTotal: p.statReceived,
 	}
 	ips := make(map[netip.Addr]struct{})
 	countries := make(map[string]struct{})

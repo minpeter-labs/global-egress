@@ -30,6 +30,11 @@ type entryState struct {
 	disabledUntil time.Time
 	openedAt      time.Time
 
+	// bytesSent and bytesReceived accumulate traffic carried through this entry,
+	// which is how you see whether one entry is carrying the whole pool.
+	bytesSent     uint64
+	bytesReceived uint64
+
 	// latency holds an exponentially weighted moving average of how long it took
 	// to reach exits in a given country through this entry, plus the sample count.
 	// Real traffic feeds this, so routing improves without extra probing.
@@ -81,6 +86,10 @@ type EntryInfo struct {
 
 	// Latency lists the measured average per exit country, in milliseconds.
 	Latency map[string]int64 `json:"latency_ms,omitempty"`
+
+	// BytesSent and BytesReceived are the traffic carried through this entry.
+	BytesSent     uint64 `json:"bytes_sent"`
+	BytesReceived uint64 `json:"bytes_received"`
 }
 
 // Entries returns a snapshot of the entry tunnels and what has been learned about
@@ -92,14 +101,16 @@ func (p *Pool) Entries() []EntryInfo {
 	out := make([]EntryInfo, 0, len(p.entries))
 	for _, entry := range p.entries {
 		info := EntryInfo{
-			ID:        entry.spec.ID,
-			Country:   entry.spec.Country,
-			City:      entry.spec.City,
-			Endpoint:  entry.spec.Endpoint,
-			Region:    string(georoute.RegionOf(entry.spec.Country)),
-			Open:      entry.isOpen(),
-			Failures:  entry.failures,
-			LastError: entry.lastError,
+			ID:            entry.spec.ID,
+			Country:       entry.spec.Country,
+			City:          entry.spec.City,
+			Endpoint:      entry.spec.Endpoint,
+			Region:        string(georoute.RegionOf(entry.spec.Country)),
+			Open:          entry.isOpen(),
+			Failures:      entry.failures,
+			LastError:     entry.lastError,
+			BytesSent:     entry.bytesSent,
+			BytesReceived: entry.bytesReceived,
 		}
 		if !entry.openedAt.IsZero() {
 			at := entry.openedAt

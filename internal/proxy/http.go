@@ -161,6 +161,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 
 	started := time.Now()
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
+	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",
 		slog.String("target", net.JoinHostPort(host, strconv.Itoa(port))),
 		slog.String("slot", lease.Slot.ID),
@@ -241,6 +242,12 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	for _, header := range hopByHopHeaders {
 		outbound.Header.Del(header)
 	}
+	// Count the request body on its way out so uploads are not invisible.
+	var uploaded countingReader
+	if outbound.Body != nil {
+		uploaded.inner = outbound.Body
+		outbound.Body = &uploaded
+	}
 
 	started := time.Now()
 	resp, err := transport.RoundTrip(outbound)
@@ -264,6 +271,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	}
 	w.WriteHeader(resp.StatusCode)
 	written, _ := io.Copy(w, resp.Body)
+	s.deps.Pool.RecordTraffic(lease, uploaded.n, written)
 
 	log.Info("request finished",
 		slog.String("target", r.URL.String()),
@@ -274,6 +282,21 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		slog.Int64("bytes", written),
 		slog.Duration("duration", time.Since(started)))
 }
+
+// countingReader tallies a request body as it is streamed upstream, since the
+// content length is often unknown until the body has been read.
+type countingReader struct {
+	inner io.ReadCloser
+	n     int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	read, err := c.inner.Read(p)
+	c.n += int64(read)
+	return read, err
+}
+
+func (c *countingReader) Close() error { return c.inner.Close() }
 
 // egressHeaders describe the chosen slot, and the policy that chose it, to the
 // client.

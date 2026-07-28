@@ -532,6 +532,178 @@
       }
     },
     {
+      "id": 20,
+      "type": "stat",
+      "title": "Data processed",
+      "description": "Payload bytes relayed since start, counted at the proxy. The guest NIC sees proxied traffic twice, once from the client and once inside the tunnel, so interface counters read roughly double this.",
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_bytes_received_total{job=\"$job\"}",
+          "refId": "A",
+          "legendFormat": "downloaded"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "global_egress_bytes_sent_total{job=\"$job\"}",
+          "refId": "B",
+          "legendFormat": "uploaded"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Proxy throughput",
+      "description": "Payload actually relayed, as opposed to what crosses the guest interface.",
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 6,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_bytes_received_total{job=\"$job\"}[5m]) * 8",
+          "refId": "A",
+          "legendFormat": "download"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_bytes_sent_total{job=\"$job\"}[5m]) * 8",
+          "refId": "B",
+          "legendFormat": "upload"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Traffic by entry tunnel",
+      "description": "Which entry is carrying the load. One entry taking everything usually means the others lost their latency race, or that they are failing and being skipped.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_entry_bytes_received_total{job=\"$job\"}[5m]) * 8",
+          "refId": "A",
+          "legendFormat": "{{entry}} ({{region}}) down"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(global_egress_entry_bytes_sent_total{job=\"$job\"}[5m]) * 8",
+          "refId": "B",
+          "legendFormat": "{{entry}} ({{region}}) up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
       "id": 8,
       "type": "timeseries",
       "title": "Exit inventory coverage",
@@ -540,7 +712,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 11
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -602,7 +774,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 11
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -655,7 +827,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 11
+        "y": 18
       },
       "datasource": {
         "type": "prometheus",
@@ -737,7 +909,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 25
       },
       "datasource": {
         "type": "prometheus",
@@ -791,7 +963,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 25
       },
       "datasource": {
         "type": "prometheus",
