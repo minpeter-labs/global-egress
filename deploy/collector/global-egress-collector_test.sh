@@ -110,7 +110,7 @@ jq -e '
 ' "$ROOT/deploy/grafana/global-egress.json"
 
 jq -e '
-  .version == 16
+  .version == 17
   and (.panels | length) == 27
   and ([.panels[] | select(.type == "row") | .title] == [
     "Overview",
@@ -136,9 +136,12 @@ jq -e '
   and ([.panels[] | select(.type == "row") | .gridPos.y] == [0, 11, 33, 49])
   and (.panels[] | select(.id == 2) | .targets[0].expr | contains("global_egress_request_results_total"))
   and (.panels[] | select(.id == 1) | .targets[0].expr | contains("global_egress_request_results_total"))
+  and (.panels[] | select(.id == 1) | .targets[0].expr | contains("> bool 2.5"))
+  and (.panels[] | select(.id == 1) | .description | contains("2.5 seconds"))
   and (.panels[] | select(.id == 1) | .fieldConfig.defaults.mappings[2].options["2"].text == "DEGRADED")
   and (.panels[] | select(.id == 3) | .targets[0].expr | contains("global_egress_request_duration_seconds_bucket"))
   and (.panels[] | select(.id == 3) | .targets[0].expr | contains("rate(") | not)
+  and (.panels[] | select(.id == 3) | .fieldConfig.defaults.thresholds.steps[-1].value == 2.5)
   and (.panels[] | select(.id == 6) | .type == "state-timeline")
   and (.panels[] | select(.id == 6) | .targets[0].legendFormat == "{{entry}}")
   and (.panels[] | select(.id == 6) | .targets[0].expr | contains("entry=~\".*[A-Za-z0-9].*\""))
@@ -155,7 +158,7 @@ jq -e '
   and (.panels[] | select(.id == 45) | .targets[0].expr | contains("global_egress_request_duration_seconds_bucket"))
   and (.panels[] | select(.id == 45) | .targets[0].expr | contains("rate(") | not)
   and (.panels[] | select(.id == 45) | .fieldConfig.defaults.color.mode == "thresholds")
-  and (.panels[] | select(.id == 45) | .fieldConfig.defaults.thresholds.steps[-1].value == 1)
+  and (.panels[] | select(.id == 45) | .fieldConfig.defaults.thresholds.steps[-1].value == 2.5)
   and (.panels[] | select(.id == 47) | .targets[0].expr | contains("global_egress_tunnel_open_duration_seconds_bucket"))
   and (.panels[] | select(.id == 47) | .targets[0].expr | contains("rate(") | not)
   and (.panels[] | select(.id == 46) | .title == "Memory usage")

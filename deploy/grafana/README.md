@@ -9,6 +9,21 @@ The layout follows the operator's scan path:
 3. **Distribution & inventory** — requested versus selected countries, fallback rate, and exit coverage.
 4. **Workload & host** — sessions, separate CPU and memory trends, network throughput, and scrape health.
 
+## Health semantics
+
+The aggregate status is intentionally stricter than process availability:
+
+- **DOWN** — the control API is unavailable.
+- **DEGRADED** — the API is available, but request success is below 99% or
+  process-lifetime request setup p95 exceeds 2.5 seconds.
+- **UP** — the API is available and both request SLOs are within those bounds.
+
+The request histogram has an explicit `2.5` second bucket, so the strict
+`p95 > 2.5s` boundary means more than 5% of successful request setups exceeded
+that bucket. The p95 panels use green below 1 second, warning from 1 second, and
+critical from 2.5 seconds. Tunnel setup latency is tracked separately and does
+not use the request threshold.
+
 ## Native visualizations
 
 The dashboard intentionally uses only built-in Grafana panels:
