@@ -143,10 +143,10 @@ The selection policy travels in the **proxy username**, which every HTTP and
 SOCKS5 client supports:
 
 ```sh
-curl -x http://egress.example.internal:3128 --proxy-user 'cc=jp:x'          https://api.example.com/
-curl -x http://egress.example.internal:3128 --proxy-user 'city=us-lax:x'     https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'cc=jp:x'              https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'city=us-lax:x'        https://api.example.com/
 curl -x http://egress.example.internal:3128 --proxy-user 'sess=job-1;ttl=600:x' https://api.example.com/
-curl -x http://egress.example.internal:3128 --proxy-user 'uniq=batch-7:x'    https://api.example.com/
+curl -x http://egress.example.internal:3128 --proxy-user 'uniq=batch-7:x'       https://api.example.com/
 ```
 
 | Directive | Meaning |
@@ -395,8 +395,10 @@ works on any Grafana. Details and the metric list:
 
 Traffic is counted **at the proxy**, not at the interface. Proxied bytes cross the
 guest NIC twice, once from the client and once inside the tunnel, so `node_network_*`
-reads roughly double and cannot say which exit or entry carried them. Both views are
-on the dashboard and are expected to disagree:
+reads roughly double and cannot say which exit or entry carried them. Proxy counters
+are committed when a connection finishes, so long-lived streams appear as a step at
+close rather than continuously. Both views are on the dashboard and are expected to
+disagree:
 
 ```text
 global_egress_bytes_sent_total / _received_total                  payload relayed

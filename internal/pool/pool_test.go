@@ -91,6 +91,23 @@ func TestSlotsFiltering(t *testing.T) {
 	}
 }
 
+func TestPolicyGeographyMatchingIsCaseInsensitive(t *testing.T) {
+	p := newTestPool(t, Options{})
+	state := p.slots["jp-tyo-wg-001"]
+	state.spec.Country = "JP"
+	state.spec.City = "JP-TYO"
+
+	p.mu.Lock()
+	eligible := p.eligibleLocked(state, policy.Policy{
+		Countries: []string{"jp"},
+		Cities:    []string{"jp-tyo"},
+	}, "", time.Now())
+	p.mu.Unlock()
+	if !eligible {
+		t.Error("lowercase policy did not match uppercase catalog metadata")
+	}
+}
+
 func TestStatsCountsGeography(t *testing.T) {
 	p := newTestPool(t, Options{MaxActive: 3})
 	stats := p.Stats()

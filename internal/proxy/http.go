@@ -64,12 +64,17 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.String("client", r.RemoteAddr))
 
 	remote, err := addrFromString(r.RemoteAddr)
-	if err == nil {
-		if err := s.deps.checkClient(remote); err != nil {
-			log.Warn("client rejected", slog.Any("error", err))
-			http.Error(w, "client not allowed", http.StatusForbidden)
-			return
-		}
+	if err != nil {
+		// Access checks must fail closed. RemoteAddr is normally supplied by the
+		// HTTP server as host:port, so an unparsable value is not a valid client.
+		log.Warn("client address rejected", slog.Any("error", err))
+		http.Error(w, "client not allowed", http.StatusForbidden)
+		return
+	}
+	if err := s.deps.checkClient(remote); err != nil {
+		log.Warn("client rejected", slog.Any("error", err))
+		http.Error(w, "client not allowed", http.StatusForbidden)
+		return
 	}
 
 	username, password, hadCredentials := proxyCredentials(r)
@@ -205,14 +210,9 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		return
 	}
 
-	lease, err := s.deps.Pool.Acquire(r.Context(), pol, host)
-	if err != nil {
-		log.Warn("acquire failed", slog.String("policy", pol.String()), slog.Any("error", err))
-		http.Error(w, err.Error(), statusCodeFor(err))
-		return
-	}
-	defer lease.Release()
-
+	// Reject forbidden destinations before acquiring a lease. Besides avoiding
+	// unnecessary work, this prevents denied requests from binding sessions or
+	// consuming a unique-batch slot.
 	if err := s.deps.Guard.CheckPort(port); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -221,6 +221,14 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
+
+	lease, err := s.deps.Pool.Acquire(r.Context(), pol, host)
+	if err != nil {
+		log.Warn("acquire failed", slog.String("policy", pol.String()), slog.Any("error", err))
+		http.Error(w, err.Error(), statusCodeFor(err))
+		return
+	}
+	defer lease.Release()
 
 	// One transport per request keeps slot selection honest: a pooled connection
 	// would silently pin later requests to an earlier slot.
@@ -332,29 +340,25 @@ func egressHeaders(lease *pool.Lease, pol policy.Policy) map[string]string {
 	return headers
 }
 
-// proxyCredentials extracts Basic credentials from Proxy-Authorization, falling
-// back to Authorization for clients that confuse the two.
+// proxyCredentials extracts Basic credentials from Proxy-Authorization.
+// Authorization is deliberately not accepted as a fallback: on plain HTTP
+// proxy requests it belongs to the origin server and may contain unrelated
+// credentials that must be forwarded unchanged.
 func proxyCredentials(r *http.Request) (username, password string, ok bool) {
-	for _, header := range []string{"Proxy-Authorization", "Authorization"} {
-		value := r.Header.Get(header)
-		if value == "" {
-			continue
-		}
-		scheme, encoded, found := strings.Cut(value, " ")
-		if !found || !strings.EqualFold(scheme, "Basic") {
-			continue
-		}
-		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
-		if err != nil {
-			continue
-		}
-		user, pass, found := strings.Cut(string(raw), ":")
-		if !found {
-			continue
-		}
-		return user, pass, true
+	value := r.Header.Get("Proxy-Authorization")
+	scheme, encoded, found := strings.Cut(value, " ")
+	if !found || !strings.EqualFold(scheme, "Basic") {
+		return "", "", false
 	}
-	return "", "", false
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+	if err != nil {
+		return "", "", false
+	}
+	user, pass, found := strings.Cut(string(raw), ":")
+	if !found {
+		return "", "", false
+	}
+	return user, pass, true
 }
 
 // splitTargetHostPort parses "host", "host:port" and "[v6]:port".

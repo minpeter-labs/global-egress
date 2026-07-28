@@ -16,11 +16,13 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/minpeter/global-egress/internal/catalog"
 	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/socksdial"
 	"github.com/minpeter/global-egress/internal/wgtunnel"
 )
 
@@ -816,10 +818,15 @@ func (p *Pool) NoteDialFailure(lease *Lease, err error) {
 	if lease == nil || lease.state == nil || err == nil {
 		return
 	}
-	if lease.Entry != "" && p.noteEntryFailure(lease.Entry, err) {
-		// The entry has been taken out of rotation; the exit is not at fault.
+	if lease.Entry != "" && !errors.Is(err, socksdial.ErrDestination) {
+		// A failure before the relay proxy answered belongs to the shared entry
+		// path, not to one of the hundreds of exits behind it. Count every such
+		// failure against the entry; noteEntryFailure applies the threshold.
+		p.noteEntryFailure(lease.Entry, err)
 		return
 	}
+	// A SOCKS refusal proves the entry path worked. Attribute it to this exit so
+	// a dead or refusing relay is retried elsewhere without taking an entry down.
 	p.noteFailure(lease.state, err)
 }
 
@@ -1117,7 +1124,7 @@ func containsFold(list []string, value string) bool {
 		return false
 	}
 	for _, item := range list {
-		if item == value {
+		if strings.EqualFold(item, value) {
 			return true
 		}
 	}

@@ -86,6 +86,8 @@ type EntryInfo struct {
 
 	// Latency lists the measured average per exit country, in milliseconds.
 	Latency map[string]int64 `json:"latency_ms,omitempty"`
+	// Samples reports how many successful dials each average is based on.
+	Samples map[string]int `json:"latency_samples,omitempty"`
 
 	// BytesSent and BytesReceived are the traffic carried through this entry.
 	BytesSent     uint64 `json:"bytes_sent"`
@@ -118,8 +120,10 @@ func (p *Pool) Entries() []EntryInfo {
 		}
 		if len(entry.latency) > 0 {
 			info.Latency = make(map[string]int64, len(entry.latency))
+			info.Samples = make(map[string]int, len(entry.samples))
 			for country, d := range entry.latency {
 				info.Latency[country] = d.Milliseconds()
+				info.Samples[country] = entry.samples[country]
 			}
 		}
 		out = append(out, info)

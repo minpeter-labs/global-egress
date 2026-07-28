@@ -38,7 +38,6 @@ type Tunnel struct {
 	net  *netstack.Net
 
 	closeOnce sync.Once
-	closeErr  error
 }
 
 // Open brings up a tunnel for the given slot. It does not wait for the
@@ -161,7 +160,7 @@ func (t *Tunnel) Close() error {
 	t.closeOnce.Do(func() {
 		t.dev.Close()
 	})
-	return t.closeErr
+	return nil
 }
 
 func buildUAPI(slot catalog.Slot, endpoint netip.AddrPort) (string, error) {
