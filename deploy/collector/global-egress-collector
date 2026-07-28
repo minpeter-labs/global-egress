@@ -28,10 +28,15 @@ emit() {
     fi
     echo 'global_egress_up 1'
 
-    # One gauge per numeric field of /v1/stats, named after the field.
+    # One series per numeric field of /v1/stats, named after the field. Fields
+    # ending in _total are monotonic, so they are declared as counters and can be
+    # rate()-d; everything else is a point-in-time gauge.
     echo "$stats" | sed -n 's/^[[:space:]]*"\([a-z_]*\)": \([0-9][0-9]*\),\{0,1\}$/\1 \2/p' |
       while read -r key value; do
-        echo "# TYPE global_egress_$key gauge"
+        case "$key" in
+          *_total) echo "# TYPE global_egress_$key counter" ;;
+          *)       echo "# TYPE global_egress_$key gauge" ;;
+        esac
         echo "global_egress_$key $value"
       done
 
@@ -40,15 +45,29 @@ emit() {
     # open in the response.
     echo '# HELP global_egress_entry_open Entry tunnel is established.'
     echo '# TYPE global_egress_entry_open gauge'
+    echo '# HELP global_egress_entry_bytes_sent_total Bytes relayed client to internet through this entry.'
+    echo '# TYPE global_egress_entry_bytes_sent_total counter'
+    echo '# HELP global_egress_entry_bytes_received_total Bytes relayed internet to client through this entry.'
+    echo '# TYPE global_egress_entry_bytes_received_total counter'
+    # Emit when an entry object closes, tracked by brace depth. Keying off a field
+    # name breaks as soon as the API reorders its JSON, and matching a bare closing
+    # brace fires early on the nested latency object.
     curl -sS --max-time 8 "$CONTROL/v1/entries" 2>/dev/null | awk '
-      /"id":/     { id = $0; sub(/.*"id": *"/, "", id); sub(/".*/, "", id) }
-      /"region":/ { region = $0; sub(/.*"region": *"/, "", region); sub(/".*/, "", region) }
-      /"open":/   {
-        open = ($0 ~ /true/) ? 1 : 0
-        if (id != "") {
-          printf "global_egress_entry_open{entry=\"%s\",region=\"%s\"} %d\n", id, region, open
-        }
-        id = ""; region = ""
+      {
+        before = depth
+        n = gsub(/\{/, "{"); depth += n
+        n = gsub(/\}/, "}"); depth -= n
+      }
+      /"id":/             { id = $0; sub(/.*"id": *"/, "", id); sub(/".*/, "", id) }
+      /"region":/         { region = $0; sub(/.*"region": *"/, "", region); sub(/".*/, "", region) }
+      /"open":/           { open = ($0 ~ /true/) ? 1 : 0 }
+      /"bytes_sent":/     { sent = $0; gsub(/[^0-9]/, "", sent) }
+      /"bytes_received":/ { recv = $0; gsub(/[^0-9]/, "", recv) }
+      before == 2 && depth == 1 && id != "" {
+        printf "global_egress_entry_open{entry=\"%s\",region=\"%s\"} %d\n", id, region, open
+        printf "global_egress_entry_bytes_sent_total{entry=\"%s\",region=\"%s\"} %s\n", id, region, (sent == "" ? "0" : sent)
+        printf "global_egress_entry_bytes_received_total{entry=\"%s\",region=\"%s\"} %s\n", id, region, (recv == "" ? "0" : recv)
+        id = ""; region = ""; open = 0; sent = ""; recv = ""
       }'
   } > "$tmp" 2>/dev/null
   chmod 0644 "$tmp"

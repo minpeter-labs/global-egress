@@ -393,6 +393,20 @@ datasource and scrape job are dashboard variables rather than baked-in values, s
 works on any Grafana. Details and the metric list:
 [`deploy/grafana/README.md`](deploy/grafana/README.md).
 
+Traffic is counted **at the proxy**, not at the interface. Proxied bytes cross the
+guest NIC twice, once from the client and once inside the tunnel, so `node_network_*`
+reads roughly double and cannot say which exit or entry carried them. Both views are
+on the dashboard and are expected to disagree:
+
+```text
+global_egress_bytes_sent_total / _received_total                  payload relayed
+global_egress_entry_bytes_sent_total{entry,region} / _received    the same, per entry
+```
+
+The per-entry split answers a question the totals cannot: whether one entry is
+carrying everything, either because it won the latency race everywhere or because
+the others are failing and being skipped.
+
 The one panel to watch over time is guest memory: userspace tunnels cost about
 1.6 MiB each, so it should stay flat once the entries are up.
 

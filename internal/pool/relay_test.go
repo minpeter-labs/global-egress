@@ -467,3 +467,54 @@ func entryByIDLocked(p *Pool, id string) *entryState {
 	}
 	return nil
 }
+
+func TestRecordTrafficAttributesToPoolSlotAndEntry(t *testing.T) {
+	// Counting at the proxy rather than the interface is the point: proxied bytes
+	// cross the guest NIC twice, so interface counters cannot say which exit or
+	// entry carried them.
+	p := newRelayPool(t, Options{})
+	state := p.slots["jp-tyo-wg-socks5-001"]
+	lease := &Lease{pool: p, state: state, Slot: state.spec, Entry: "jp-tyo-wg-001", Chained: true}
+
+	p.RecordTraffic(lease, 1000, 4000)
+	p.RecordTraffic(lease, 500, 1500)
+
+	stats := p.Stats()
+	if stats.BytesSentTotal != 1500 || stats.BytesReceivedTotal != 5500 {
+		t.Errorf("pool totals = %d/%d, want 1500/5500", stats.BytesSentTotal, stats.BytesReceivedTotal)
+	}
+
+	var slot SlotInfo
+	for _, info := range p.Slots(SlotFilter{Country: "jp"}) {
+		if info.ID == "jp-tyo-wg-socks5-001" {
+			slot = info
+		}
+	}
+	if slot.BytesSent != 1500 || slot.BytesReceived != 5500 {
+		t.Errorf("slot totals = %d/%d", slot.BytesSent, slot.BytesReceived)
+	}
+
+	for _, entry := range p.Entries() {
+		want := uint64(0)
+		if entry.ID == "jp-tyo-wg-001" {
+			want = 1500
+		}
+		if entry.BytesSent != want {
+			t.Errorf("entry %s sent = %d, want %d", entry.ID, entry.BytesSent, want)
+		}
+	}
+}
+
+func TestRecordTrafficIgnoresNothingToCount(t *testing.T) {
+	p := newRelayPool(t, Options{})
+	state := p.slots["jp-tyo-wg-socks5-001"]
+	lease := &Lease{pool: p, state: state, Slot: state.spec}
+
+	p.RecordTraffic(nil, 10, 10)
+	p.RecordTraffic(lease, 0, 0)
+	p.RecordTraffic(lease, -5, -5)
+
+	if stats := p.Stats(); stats.BytesSentTotal != 0 || stats.BytesReceivedTotal != 0 {
+		t.Errorf("totals moved on no-op calls: %d/%d", stats.BytesSentTotal, stats.BytesReceivedTotal)
+	}
+}

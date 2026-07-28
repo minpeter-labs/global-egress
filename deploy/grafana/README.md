@@ -61,6 +61,13 @@ Series it produces:
 | `global_egress_new_tunnels_used`, `global_egress_new_tunnel_budget` | key associations against the rate budget |
 | `global_egress_acquisitions`, `global_egress_failures`, `global_egress_rotations`, `global_egress_reports`, `global_egress_refused_busy` | counters |
 | `global_egress_sticky_sessions`, `global_egress_unique_batches` | live policy state |
+| `global_egress_bytes_sent_total`, `global_egress_bytes_received_total` | payload relayed, counted at the proxy |
+| `global_egress_entry_bytes_sent_total{entry,region}`, `..._received_total{entry,region}` | the same, per entry tunnel |
+
+Counting bytes at the proxy rather than at the interface is deliberate: proxied
+traffic crosses the guest NIC twice, once from the client and once inside the
+tunnel, so `node_network_*` reads roughly double and cannot be attributed to an exit
+or an entry. Both views are on the dashboard; they are expected to disagree.
 
 The collector only ever performs GETs. Never call rotate, report or probe from
 monitoring: a monitor that changes the thing it measures is worse than no monitor.

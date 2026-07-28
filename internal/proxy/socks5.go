@@ -135,6 +135,7 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 
 	started := time.Now()
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
+	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",
 		slog.String("target", target),
 		slog.String("slot", lease.Slot.ID),

@@ -176,6 +176,10 @@ type slotState struct {
 
 	// cooldowns maps a destination host to the time the slot may serve it again.
 	cooldowns map[string]time.Time
+
+	// bytesSent and bytesReceived accumulate relayed traffic for this slot.
+	bytesSent     uint64
+	bytesReceived uint64
 }
 
 func (s *slotState) isOpen() bool { return s.tunnel != nil }
@@ -244,6 +248,8 @@ type Pool struct {
 	// counters, protected by mu
 	statAcquired uint64
 	statBusy     uint64
+	statSent     uint64
+	statReceived uint64
 	statRotated  uint64
 	statReports  uint64
 	statFailures uint64
@@ -760,6 +766,45 @@ func (p *Pool) dropSession(name string) {
 	p.mu.Lock()
 	delete(p.sessions, name)
 	p.mu.Unlock()
+}
+
+// RecordTraffic accounts bytes relayed for a finished connection.
+//
+// Counting here rather than at the network interface matters: proxied traffic
+// crosses the guest's NIC twice, once from the client and once inside the tunnel,
+// so interface counters read roughly double and cannot be attributed to a country,
+// an exit or an entry.
+//
+// sent is client to internet, received is internet to client.
+func (p *Pool) RecordTraffic(lease *Lease, sent, received int64) {
+	if lease == nil || lease.state == nil || (sent <= 0 && received <= 0) {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if sent > 0 {
+		p.statSent += uint64(sent)
+		lease.state.bytesSent += uint64(sent)
+	}
+	if received > 0 {
+		p.statReceived += uint64(received)
+		lease.state.bytesReceived += uint64(received)
+	}
+	if lease.Entry == "" {
+		return
+	}
+	for _, entry := range p.entries {
+		if entry.spec.ID == lease.Entry {
+			if sent > 0 {
+				entry.bytesSent += uint64(sent)
+			}
+			if received > 0 {
+				entry.bytesReceived += uint64(received)
+			}
+			return
+		}
+	}
 }
 
 // NoteDialFailure records that a leased egress could not reach its destination.
