@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/mullvad"
+	"github.com/minpeter/global-egress/internal/mullvad"
 )
 
 // runRelays inspects (and optionally refreshes) the provider relay list, which is

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/minpeter-labs/global-egress/internal/catalog"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 func newTestServer(t *testing.T, opts Options) (*Server, *pool.Pool) {

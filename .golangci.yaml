@@ -46,4 +46,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/minpeter-labs/global-egress
+        - github.com/minpeter/global-egress

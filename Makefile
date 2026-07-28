@@ -59,7 +59,7 @@ tidy:
 # `go list -m -u all` walks gvisor's whole module graph (containerd, k8s, grpc)
 # and drowns the handful of modules we actually build against, so list only those.
 outdated:
-	@go list -m -u $$(go list -deps ./... | xargs go list -f '{{if .Module}}{{.Module.Path}}{{end}}' | sort -u | grep -vE '^$$|minpeter-labs') 2>/dev/null | grep '\[' || echo "all build dependencies are current"
+	@go list -m -u $$(go list -deps ./... | xargs go list -f '{{if .Module}}{{.Module.Path}}{{end}}' | sort -u | grep -vE "^$$|^$$(go list -m)$$") 2>/dev/null | grep '\[' || echo "all build dependencies are current"
 
 check: fmtcheck vet lint test
 

@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/netguard"
-	"github.com/minpeter-labs/global-egress/internal/policy"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/netguard"
+	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // Deps are the shared dependencies of both proxy listeners.

@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/minpeter-labs/global-egress/internal/netguard"
+	"github.com/minpeter/global-egress/internal/netguard"
 )
 
 // Mode selects where exit addresses come from.

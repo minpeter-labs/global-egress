@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/policy"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // HTTPServer serves the pool as an HTTP forward proxy.

@@ -1,6 +1,6 @@
 [Unit]
 Description=global-egress rotating WireGuard egress proxy
-Documentation=https://github.com/minpeter-labs/global-egress
+Documentation=https://github.com/minpeter/global-egress
 After=network-online.target
 Wants=network-online.target
 

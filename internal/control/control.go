@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 // Options configures the control server.

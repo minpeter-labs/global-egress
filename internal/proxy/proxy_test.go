@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/minpeter-labs/global-egress/internal/policy"
-	"github.com/minpeter-labs/global-egress/internal/pool"
+	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/pool"
 )
 
 func TestCheckClient(t *testing.T) {
