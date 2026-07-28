@@ -30,6 +30,11 @@ const (
 	replySuccess = 0x00
 )
 
+// ErrDestination is returned when the SOCKS proxy was reached successfully but
+// refused the requested destination. Callers can use it to avoid blaming the
+// path to the proxy for an origin-side failure.
+var ErrDestination = errors.New("socksdial: destination refused")
+
 // Dialer connects to destinations through a SOCKS5 proxy.
 type Dialer struct {
 	// Base opens the connection to the proxy itself.
@@ -154,7 +159,7 @@ func readConnectReply(conn net.Conn) error {
 		return fmt.Errorf("socksdial: bad reply version %d", header[0])
 	}
 	if header[1] != replySuccess {
-		return fmt.Errorf("socksdial: proxy refused: %s", replyMessage(header[1]))
+		return fmt.Errorf("%w: %s", ErrDestination, replyMessage(header[1]))
 	}
 
 	// Consume the bound address so the stream starts at the payload.

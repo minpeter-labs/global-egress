@@ -401,7 +401,22 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 	results := make([]ProbeResult, len(targets))
 	sem := make(chan struct{}, opts.Concurrency)
 	var wg sync.WaitGroup
-	var mu sync.Mutex
+
+	// Deliver callbacks on one dedicated goroutine. Callers need not be
+	// concurrency-safe, while a slow callback no longer holds a worker slot and
+	// serializes the actual probing work.
+	var callbackWG sync.WaitGroup
+	var completed chan ProbeResult
+	if opts.OnResult != nil {
+		completed = make(chan ProbeResult, len(targets))
+		callbackWG.Add(1)
+		go func() {
+			defer callbackWG.Done()
+			for result := range completed {
+				opts.OnResult(result)
+			}
+		}()
+	}
 
 	var pace <-chan time.Time
 	if opts.Interval > 0 {
@@ -470,15 +485,17 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 			}
 			result.Latency = time.Since(started)
 
-			mu.Lock()
 			results[idx] = result
-			if opts.OnResult != nil {
-				opts.OnResult(result)
+			if completed != nil {
+				completed <- result
 			}
-			mu.Unlock()
 		}(i, state)
 	}
 	wg.Wait()
+	if completed != nil {
+		close(completed)
+		callbackWG.Wait()
+	}
 	return results
 }
 

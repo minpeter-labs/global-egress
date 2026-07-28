@@ -168,6 +168,9 @@ func TestDialRejectedByProxy(t *testing.T) {
 	if got := err.Error(); !contains(got, "connection refused") {
 		t.Errorf("error = %q, want it to mention the refusal reason", got)
 	}
+	if !errors.Is(err, ErrDestination) {
+		t.Errorf("error = %v, want ErrDestination", err)
+	}
 }
 
 func TestDialProxyDemandsAuth(t *testing.T) {

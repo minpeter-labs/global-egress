@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minpeter/global-egress/internal/catalog"
+	"github.com/minpeter/global-egress/internal/netguard"
 	"github.com/minpeter/global-egress/internal/policy"
 	"github.com/minpeter/global-egress/internal/pool"
 )
@@ -105,11 +107,12 @@ func TestProxyCredentials(t *testing.T) {
 		t.Fatalf("got (%q, %q, %v)", user, pass, ok)
 	}
 
-	// Clients that send Authorization instead are tolerated.
+	// Authorization belongs to the origin server and must not be mistaken for
+	// proxy credentials.
 	req2 := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	req2.Header.Set("Authorization", "Basic "+encoded)
-	if _, _, ok := proxyCredentials(req2); !ok {
-		t.Error("Authorization header was ignored")
+	if _, _, ok := proxyCredentials(req2); ok {
+		t.Error("origin Authorization header accepted as proxy credentials")
 	}
 
 	req3 := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
@@ -121,6 +124,44 @@ func TestProxyCredentials(t *testing.T) {
 	req4.Header.Set("Proxy-Authorization", "Bearer xyz")
 	if _, _, ok := proxyCredentials(req4); ok {
 		t.Error("non-Basic scheme accepted")
+	}
+}
+
+func TestHTTPForwardRejectsDestinationBeforeAcquire(t *testing.T) {
+	p, err := pool.NewWithSpecs([]pool.Spec{{
+		ID: "relay-1", Kind: pool.KindRelaySocks, SocksAddr: "relay.example:1080",
+	}}, []catalog.Slot{{ID: "entry-1"}}, pool.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	guard, err := netguard.New(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewHTTP(Deps{Pool: p, Guard: guard})
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/private", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleForward(rec, req, policy.Policy{Session: "must-not-bind"}, slog.Default())
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	stats := p.Stats()
+	if stats.Acquisitions != 0 || stats.Sessions != 0 {
+		t.Errorf("denied request changed pool state: %+v", stats)
+	}
+}
+
+func TestHTTPRejectsUnparseableClientAddress(t *testing.T) {
+	server := NewHTTP(Deps{})
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "not-an-address"
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 

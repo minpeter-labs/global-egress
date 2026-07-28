@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/minpeter/global-egress/internal/catalog"
 	"github.com/minpeter/global-egress/internal/policy"
+	"github.com/minpeter/global-egress/internal/socksdial"
 )
 
 func testExits() []ExitSpec {
@@ -242,6 +244,9 @@ func TestEntriesSnapshot(t *testing.T) {
 	if infos[0].Latency["jp"] != 200 {
 		t.Errorf("Latency = %v, want jp=200ms", infos[0].Latency)
 	}
+	if infos[0].Samples["jp"] != 1 {
+		t.Errorf("Samples = %v, want jp=1", infos[0].Samples)
+	}
 	if infos[0].Open {
 		t.Error("no entry should be reported open in this test")
 	}
@@ -452,10 +457,27 @@ func TestDialFailureBlamesEntryNotExit(t *testing.T) {
 	if entryFailures < entryFailureThreshold {
 		t.Errorf("entry failures = %d, want at least %d", entryFailures, entryFailureThreshold)
 	}
-	// The last failure was attributed to the entry, so the exit must not have
-	// absorbed all of them.
-	if slotFailures >= entryFailureThreshold {
-		t.Errorf("exit failures = %d; the entry should have been blamed instead", slotFailures)
+	if slotFailures != 0 {
+		t.Errorf("exit failures = %d, want 0 when the entry path failed", slotFailures)
+	}
+}
+
+func TestDestinationRefusalDoesNotBlameEntry(t *testing.T) {
+	p := newRelayPool(t, Options{FailureBackoff: time.Minute})
+	state := p.slots["jp-tyo-wg-socks5-001"]
+	lease := &Lease{pool: p, state: state, Slot: state.spec, Entry: "jp-tyo-wg-001", Chained: true}
+
+	p.NoteDialFailure(lease, fmt.Errorf("wrapped: %w", socksdial.ErrDestination))
+
+	p.mu.Lock()
+	entryFailures := entryByIDLocked(p, "jp-tyo-wg-001").failures
+	slotFailures := state.failures
+	p.mu.Unlock()
+	if entryFailures != 0 {
+		t.Errorf("entry failures = %d, want 0 after destination refusal", entryFailures)
+	}
+	if slotFailures != 1 {
+		t.Errorf("exit failures = %d, want 1 after destination refusal", slotFailures)
 	}
 }
 
