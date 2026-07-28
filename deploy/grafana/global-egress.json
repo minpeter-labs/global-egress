@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 17,
+  "version": 18,
   "refresh": "30s",
   "time": {
     "from": "now-6h",
@@ -70,7 +70,7 @@
       "id": 1,
       "type": "stat",
       "title": "Status",
-      "description": "DOWN when the control API is unavailable, DEGRADED when success rate is below 99% or p95 setup latency exceeds 2.5 seconds.",
+      "description": "DOWN when the control API is unavailable, DEGRADED when the rolling 15-minute request success rate is below 99% or p95 setup latency exceeds 2.5 seconds.",
       "gridPos": {
         "h": 5,
         "w": 8,
@@ -87,7 +87,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "global_egress_up{job=\"$job\"} * scalar(1 + clamp_max(((100 * sum(global_egress_request_results_total{job=\"$job\",result=\"success\"}) / clamp_min(sum(global_egress_request_results_total{job=\"$job\"}), 1) < bool 99) * (sum(global_egress_request_results_total{job=\"$job\"}) > bool 0)) + ((histogram_quantile(0.95, sum by (le) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"})) or vector(0)) > bool 2.5), 1))",
+          "expr": "global_egress_up{job=\"$job\"} * scalar(1 + clamp_max(((100 * sum(increase(global_egress_request_results_total{job=\"$job\",result=\"success\"}[15m])) / clamp_min(sum(increase(global_egress_request_results_total{job=\"$job\"}[15m])), 1) < bool 99) * (sum(increase(global_egress_request_results_total{job=\"$job\"}[15m])) > bool 0)) + ((histogram_quantile(0.95, sum by (le) (rate(global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"}[15m]))) or vector(0)) > bool 2.5), 1))",
           "refId": "A",
           "legendFormat": "up"
         }
@@ -230,7 +230,7 @@
       "id": 3,
       "type": "stat",
       "title": "p95 setup latency",
-      "description": "Process-lifetime 95th percentile time from an accepted proxy request until its upstream connection or response headers are ready. Warning begins at 1 second and critical at 2.5 seconds.",
+      "description": "Rolling 15-minute 95th percentile time from an accepted proxy request until its upstream connection or response headers are ready. Warning begins at 1 second and critical at 2.5 seconds.",
       "gridPos": {
         "h": 5,
         "w": 8,
@@ -247,7 +247,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"}))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\"}[15m])))",
           "instant": true,
           "range": false,
           "refId": "A",
@@ -936,7 +936,7 @@
       "id": 45,
       "type": "bargauge",
       "title": "Entry p95 setup latency",
-      "description": "Successful request setup latency by the entry tunnel that carried the request. Warning begins at 1 second and critical at 2.5 seconds.",
+      "description": "Rolling 15-minute successful request setup latency by the entry tunnel that carried the request. Warning begins at 1 second and critical at 2.5 seconds.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -953,7 +953,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, entry) (global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\",entry!=\"none\"}))",
+          "expr": "histogram_quantile(0.95, sum by (le, entry) (rate(global_egress_request_duration_seconds_bucket{job=\"$job\",result=\"success\",entry!=\"none\"}[15m])))",
           "instant": true,
           "range": false,
           "refId": "A",

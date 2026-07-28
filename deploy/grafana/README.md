@@ -14,9 +14,13 @@ The layout follows the operator's scan path:
 The aggregate status is intentionally stricter than process availability:
 
 - **DOWN** — the control API is unavailable.
-- **DEGRADED** — the API is available, but request success is below 99% or
-  process-lifetime request setup p95 exceeds 2.5 seconds.
+- **DEGRADED** — the API is available, but rolling 15-minute request success is
+  below 99% or request setup p95 exceeds 2.5 seconds.
 - **UP** — the API is available and both request SLOs are within those bounds.
+
+Status, request p95, and entry p95 use the same rolling 15-minute window. This
+lets the dashboard recover after a transient startup failure instead of keeping
+one old failure in the process-lifetime counters until the next restart.
 
 The request histogram has an explicit `2.5` second bucket, so the strict
 `p95 > 2.5s` boundary means more than 5% of successful request setups exceeded
