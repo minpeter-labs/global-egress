@@ -320,6 +320,7 @@ type Pool struct {
 	// to NewTunnelWindow.
 	opens              []time.Time
 	pendingTunnelOpens int
+	probeTunnels       int
 	// closing is set by Close so background work stops starting.
 	closing bool
 
@@ -338,7 +339,7 @@ type Pool struct {
 	pendingLeases int
 
 	ensureDialerForAcquire func(context.Context, *slotState) (Dialer, string, error)
-	openTunnelForAcquire   func(context.Context, catalog.Slot, TunnelRole) (*wgtunnel.Tunnel, error)
+	openTunnelForCapacity  func(context.Context, catalog.Slot, TunnelRole) (*wgtunnel.Tunnel, error)
 
 	// counters, protected by mu
 	statAcquired          uint64
@@ -417,7 +418,7 @@ func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, er
 		})
 	}
 	p.ensureDialerForAcquire = p.ensureDialer
-	p.openTunnelForAcquire = p.openTunnel
+	p.openTunnelForCapacity = p.openTunnel
 	return p, nil
 }
 
@@ -685,6 +686,12 @@ func (p *Pool) reserveCapacityLocked() error {
 			openCount++
 		}
 	}
+	for _, entry := range p.entries {
+		if entry.isOpen() || entry.opening != nil {
+			openCount++
+		}
+	}
+	openCount += p.probeTunnels
 	if openCount < p.opts.MaxActive {
 		return nil
 	}
@@ -787,7 +794,7 @@ func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunn
 			return nil, err
 		}
 		p.commitTunnelOpen()
-		tunnel, err := p.openTunnelForAcquire(ctx, spec, TunnelRoleDirect)
+		tunnel, err := p.openTunnelForCapacity(ctx, spec, TunnelRoleDirect)
 
 		p.mu.Lock()
 		state.opening = nil

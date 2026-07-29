@@ -719,19 +719,40 @@ func (p *Pool) probeDialer(ctx context.Context, state *slotState) (Dialer, func(
 		p.mu.Unlock()
 		return nil, nil, err
 	}
+	if err := p.reserveCapacityLocked(); err != nil {
+		p.mu.Unlock()
+		return nil, nil, err
+	}
 	if err := p.reserveTunnelOpenLocked(time.Now()); err != nil {
 		p.mu.Unlock()
 		return nil, nil, err
 	}
+	p.probeTunnels++
 	p.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		p.rollbackTunnelOpen()
+		p.releaseProbeCapacity()
 		return nil, nil, err
 	}
 	p.commitTunnelOpen()
-	tunnel, err := p.openTunnel(ctx, state.spec.WG, TunnelRoleDirect)
+	tunnel, err := p.openTunnelForCapacity(ctx, state.spec.WG, TunnelRoleDirect)
 	if err != nil {
+		p.releaseProbeCapacity()
 		return nil, nil, err
 	}
-	return tunnel, func() { _ = tunnel.Close() }, nil
+	var closeOnce sync.Once
+	return tunnel, func() {
+		closeOnce.Do(func() {
+			_ = tunnel.Close()
+			p.releaseProbeCapacity()
+		})
+	}, nil
+}
+
+func (p *Pool) releaseProbeCapacity() {
+	p.mu.Lock()
+	if p.probeTunnels > 0 {
+		p.probeTunnels--
+	}
+	p.mu.Unlock()
 }
