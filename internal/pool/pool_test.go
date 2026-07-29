@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +246,31 @@ func TestReportUnknownTargets(t *testing.T) {
 	}
 	if _, err := p.Report(ReportInput{Session: "never-bound"}); err == nil {
 		t.Error("expected an error for an unknown session")
+	}
+}
+
+func TestOperationalLogsRedactNetworkDetails(t *testing.T) {
+	var output bytes.Buffer
+	p := newTestPool(t, Options{})
+	p.log = slog.New(slog.NewTextHandler(&output, nil))
+
+	state := p.slots["jp-tyo-wg-001"]
+	p.noteFailure(state, errors.New("dial 203.0.113.9:443: refused"))
+	if _, err := p.Report(ReportInput{
+		Slot:   state.spec.ID,
+		Target: "198.51.100.4:443",
+		Reason: "exit 192.0.2.8 exhausted",
+	}); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	for _, raw := range []string{"203.0.113.9", "198.51.100.4", "192.0.2.8"} {
+		if strings.Contains(output.String(), raw) {
+			t.Fatalf("operational log leaked %q: %s", raw, output.String())
+		}
+		if strings.Contains(state.lastError, raw) {
+			t.Fatalf("last error leaked %q: %s", raw, state.lastError)
+		}
 	}
 }
 

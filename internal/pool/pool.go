@@ -701,7 +701,9 @@ func (p *Pool) closeLocked(state *slotState, reason string) {
 	go func() {
 		defer p.wg.Done()
 		if err := tunnel.Close(); err != nil {
-			p.log.Warn("tunnel close failed", slog.String("slot", id), slog.Any("error", err))
+			p.log.Warn("tunnel close failed",
+				slog.String("slot", id),
+				slog.String("error_type", fmt.Sprintf("%T", err)))
 		}
 	}()
 }
@@ -826,7 +828,7 @@ func (p *Pool) noteFailure(state *slotState, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	state.failures++
-	state.lastError = err.Error()
+	state.lastError = fmt.Sprintf("%T", err)
 	p.statFailures++
 	// Exponential backoff, capped, so a dead server stops being retried without
 	// being removed from the catalog.
@@ -842,7 +844,7 @@ func (p *Pool) noteFailure(state *slotState, err error) {
 		slog.String("slot", state.spec.ID),
 		slog.Int("failures", state.failures),
 		slog.Duration("backoff", backoff),
-		slog.Any("error", err))
+		slog.String("error_type", fmt.Sprintf("%T", err)))
 }
 
 func (p *Pool) sessionTTL(pol policy.Policy) time.Duration {
@@ -1059,8 +1061,8 @@ func (p *Pool) Report(in ReportInput) (ReportResult, error) {
 
 	p.log.Info("egress reported",
 		slog.String("slot", slotID),
-		slog.String("target", in.Target),
-		slog.String("reason", in.Reason),
+		slog.Bool("target_scoped", in.Target != ""),
+		slog.Bool("reason_present", in.Reason != ""),
 		slog.Duration("cooldown", cooldown))
 
 	return ReportResult{

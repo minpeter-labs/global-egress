@@ -209,7 +209,7 @@ func (p *Pool) noteEntryFailure(entryID string, err error) bool {
 	}
 
 	entry.failures++
-	entry.lastError = err.Error()
+	entry.lastError = fmt.Sprintf("%T", err)
 	if entry.failures < entryFailureThreshold {
 		return false
 	}
@@ -236,7 +236,7 @@ func (p *Pool) noteEntryFailure(entryID string, err error) bool {
 		slog.String("entry", entryID),
 		slog.Int("consecutive_failures", entry.failures),
 		slog.Duration("backoff", backoff),
-		slog.Any("error", err))
+		slog.String("error_type", fmt.Sprintf("%T", err)))
 	return true
 }
 
@@ -279,7 +279,7 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 			entry.lastError = ""
 		} else {
 			entry.failures++
-			entry.lastError = err.Error()
+			entry.lastError = fmt.Sprintf("%T", err)
 			backoff := p.opts.FailureBackoff << min(entry.failures-1, 5)
 			if maxBackoff := 10 * time.Minute; backoff > maxBackoff {
 				backoff = maxBackoff
@@ -293,7 +293,7 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 			p.log.Warn("entry tunnel failed",
 				slog.String("entry", spec.ID),
 				slog.Int("failures", entry.failures),
-				slog.Any("error", err))
+				slog.String("error_type", fmt.Sprintf("%T", err)))
 			return nil, err
 		}
 		p.log.Info("entry tunnel up",
@@ -369,7 +369,9 @@ func (p *Pool) closeEntriesLocked(reason string) {
 		go func() {
 			defer p.wg.Done()
 			if err := tunnel.Close(); err != nil {
-				p.log.Warn("entry close failed", slog.String("entry", id), slog.Any("error", err))
+				p.log.Warn("entry close failed",
+					slog.String("entry", id),
+					slog.String("error_type", fmt.Sprintf("%T", err)))
 			}
 		}()
 	}
