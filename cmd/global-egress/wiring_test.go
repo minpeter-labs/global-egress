@@ -28,6 +28,7 @@ func TestConfigLimitsReachThePool(t *testing.T) {
 		{"max_concurrent_conns", cfg.Pool.MaxConcurrentConns, opts.MaxConcurrentConns},
 		{"new_tunnels_per_window", cfg.Pool.NewTunnelsPerWindow, opts.NewTunnelBudget},
 		{"dial_attempts", cfg.Pool.DialAttempts, opts.DialAttempts},
+		{"max_unique_batches", cfg.Pool.MaxUniqueBatches, opts.MaxUniqueBatches},
 	}
 	for _, tc := range cases {
 		if tc.configured == 0 {

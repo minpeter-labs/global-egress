@@ -296,6 +296,7 @@ func poolOptionsFrom(cfg config.Config, logger *slog.Logger) pool.Options {
 		MaxConcurrentConns:      cfg.Pool.MaxConcurrentConns,
 		SessionTTL:              cfg.Pool.SessionTTL,
 		BatchTTL:                cfg.Pool.BatchTTL,
+		MaxUniqueBatches:        cfg.Pool.MaxUniqueBatches,
 		Cooldown:                cfg.Pool.Cooldown,
 		IdleTimeout:             cfg.Pool.IdleTimeout,
 		HandshakeTimeout:        cfg.Pool.HandshakeTimeout,

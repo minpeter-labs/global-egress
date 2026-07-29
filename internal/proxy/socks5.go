@@ -100,9 +100,11 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 		// refusal has to be visible to the operator instead: it almost always means
 		// a caller dropped its credentials rather than an attack.
 		if errors.Is(err, errPolicyRequired) {
-			log.Warn("rejected: no selection policy supplied", slog.Any("error", err))
+			log.Warn("rejected: no selection policy supplied")
 		} else {
-			log.Debug("negotiation failed", slog.Any("error", err))
+			// Policy parse failures can echo attacker-supplied directives, including
+			// malformed addresses, so do not reflect their text into logs.
+			log.Debug("negotiation failed")
 		}
 		return
 	}
@@ -120,7 +122,7 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
 			slog.String("target", target),
-			slog.String("policy", pol.String()),
+			policyLogAttr(pol),
 			slog.Any("error", err))
 		_ = writeReply(client, replyCodeFor(err), nil)
 		return
@@ -143,8 +145,8 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	log.Info("session finished",
 		slog.String("target", target),
 		slog.String("slot", lease.Slot.ID),
-		slog.String("egress_ip", ipString(lease)),
-		slog.String("policy", pol.String()),
+		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
+		policyLogAttr(pol),
 		slog.Int64("sent", sent),
 		slog.Int64("received", received),
 		slog.Duration("duration", time.Since(started)))

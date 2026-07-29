@@ -124,6 +124,8 @@ type PoolConfig struct {
 	SessionTTL time.Duration `yaml:"session_ttl"`
 	// BatchTTL is how long a unique-IP batch is remembered.
 	BatchTTL time.Duration `yaml:"batch_ttl"`
+	// MaxUniqueBatches caps concurrently active unique-IP batches.
+	MaxUniqueBatches int `yaml:"max_unique_batches"`
 	// Cooldown is the default per-target cooldown applied by a report.
 	Cooldown time.Duration `yaml:"cooldown"`
 	// IdleTimeout closes tunnels unused for this long.
@@ -203,6 +205,7 @@ func Default() Config {
 			Preopen:             0,
 			SessionTTL:          10 * time.Minute,
 			BatchTTL:            15 * time.Minute,
+			MaxUniqueBatches:    10_000,
 			Cooldown:            15 * time.Minute,
 			IdleTimeout:         10 * time.Minute,
 			HandshakeTimeout:    12 * time.Second,
@@ -303,6 +306,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Pool.MaxConcurrentConns < 0 {
 		return fmt.Errorf("config: pool.max_concurrent_conns must not be negative")
+	}
+	if c.Pool.MaxUniqueBatches <= 0 {
+		return fmt.Errorf("config: pool.max_unique_batches must be positive")
 	}
 	if c.Pool.EntryExploreRate < 0 || c.Pool.EntryExploreRate >= 1 {
 		return fmt.Errorf("config: pool.entry_explore_rate must be in [0, 1)")

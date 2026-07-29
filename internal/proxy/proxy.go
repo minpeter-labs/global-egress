@@ -76,6 +76,10 @@ var errUnauthorized = errors.New("proxy: unauthorized")
 // the operator has asked for them to be mandatory.
 var errPolicyRequired = errors.New("proxy: no selection policy supplied")
 
+func policyLogAttr(pol policy.Policy) slog.Attr {
+	return slog.String("policy", pol.LogString())
+}
+
 // checkClient enforces the client ACL.
 func (d *Deps) checkClient(remote net.Addr) error {
 	if len(d.AllowedClients) == 0 {
@@ -193,6 +197,8 @@ func replyCodeFor(err error) byte {
 	case errors.Is(err, pool.ErrNoCandidate), errors.Is(err, pool.ErrCapacity),
 		errors.Is(err, pool.ErrTunnelBudget), errors.Is(err, pool.ErrBusy):
 		return repNotAllowed
+	case errors.Is(err, pool.ErrBatchFull):
+		return repGeneralFailure
 	case errors.Is(err, pool.ErrExhausted):
 		return repHostUnreachable
 	case errors.Is(err, context.DeadlineExceeded):
@@ -210,15 +216,6 @@ func isRefused(err error) bool {
 		return sysErr.Err != nil && strings.Contains(sysErr.Err.Error(), "refused")
 	}
 	return strings.Contains(err.Error(), "refused")
-}
-
-// ipString renders a lease's measured egress IP, or "unknown" before the first
-// measurement completes.
-func ipString(lease *pool.Lease) string {
-	if lease == nil || !lease.PublicIP.IsValid() {
-		return "unknown"
-	}
-	return lease.PublicIP.String()
 }
 
 // closeWriter is implemented by TCP-like connections that support half-close,

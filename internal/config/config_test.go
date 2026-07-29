@@ -62,6 +62,7 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 		"pool.max_concurrent_conns":   cfg.Pool.MaxConcurrentConns,
 		"pool.new_tunnels_per_window": cfg.Pool.NewTunnelsPerWindow,
 		"pool.dial_attempts":          cfg.Pool.DialAttempts,
+		"pool.max_unique_batches":     cfg.Pool.MaxUniqueBatches,
 	}
 	for name, value := range cases {
 		if value <= 0 {
@@ -76,6 +77,9 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 		if value <= 0 {
 			t.Errorf("%s defaults to %s", name, value)
 		}
+	}
+	if cfg.Pool.MaxUniqueBatches != 10_000 {
+		t.Errorf("MaxUniqueBatches = %d, want 10000", cfg.Pool.MaxUniqueBatches)
 	}
 	if cfg.Mode != ModeRelaySocks {
 		t.Errorf("Mode defaults to %q, want %q", cfg.Mode, ModeRelaySocks)
@@ -161,15 +165,16 @@ func TestValidate(t *testing.T) {
 	}
 
 	cases := map[string]func(*Config){
-		"no catalog":           func(c *Config) { c.Catalog.Path = "" },
-		"no listeners":         func(c *Config) { c.Listen.SOCKS5 = ""; c.Listen.HTTP = "" },
-		"bad client cidr":      func(c *Config) { c.Access.AllowedClients = []string{"nope"} },
-		"bad denied cidr":      func(c *Config) { c.Destinations.DeniedCIDRs = []string{"nope"} },
-		"negative max_active":  func(c *Config) { c.Pool.MaxActive = -1 },
-		"preopen over budget":  func(c *Config) { c.Pool.MaxActive = 2; c.Pool.Preopen = 3 },
-		"bad log level":        func(c *Config) { c.Log.Level = "loud" },
-		"bad log format":       func(c *Config) { c.Log.Format = "yaml" },
-		"invalid allowed port": func(c *Config) { c.Destinations.AllowedPorts = []int{0} },
+		"no catalog":              func(c *Config) { c.Catalog.Path = "" },
+		"no listeners":            func(c *Config) { c.Listen.SOCKS5 = ""; c.Listen.HTTP = "" },
+		"bad client cidr":         func(c *Config) { c.Access.AllowedClients = []string{"nope"} },
+		"bad denied cidr":         func(c *Config) { c.Destinations.DeniedCIDRs = []string{"nope"} },
+		"negative max_active":     func(c *Config) { c.Pool.MaxActive = -1 },
+		"zero unique batch limit": func(c *Config) { c.Pool.MaxUniqueBatches = 0 },
+		"preopen over budget":     func(c *Config) { c.Pool.MaxActive = 2; c.Pool.Preopen = 3 },
+		"bad log level":           func(c *Config) { c.Log.Level = "loud" },
+		"bad log format":          func(c *Config) { c.Log.Format = "yaml" },
+		"invalid allowed port":    func(c *Config) { c.Destinations.AllowedPorts = []int{0} },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

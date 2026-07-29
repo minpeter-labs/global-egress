@@ -66,8 +66,9 @@ func (p Policy) IsZero() bool {
 		p.Session == "" && p.TTL == 0 && p.UniqueBatch == "" && len(p.ExcludeIPs) == 0
 }
 
-// String renders the policy in the same syntax it is parsed from, which makes
-// it safe and useful for logging (it never contains the password).
+// String renders the policy in the same syntax it is parsed from. It never
+// contains the password, but callers logging it should use LogString so excluded
+// IP addresses stay out of operational logs.
 func (p Policy) String() string {
 	var parts []string
 	if p.AnyExit {
@@ -105,9 +106,26 @@ func (p Policy) String() string {
 	return strings.Join(parts, ";")
 }
 
+// LogString renders a policy for operational logs without exposing excluded IP
+// addresses. It retains their count, which is enough to diagnose policy shape.
+func (p Policy) LogString() string {
+	excluded := len(p.ExcludeIPs)
+	p.ExcludeIPs = nil
+	rendered := p.String()
+	if excluded == 0 {
+		return rendered
+	}
+	if rendered == "(none)" {
+		return fmt.Sprintf("not_count=%d", excluded)
+	}
+	return fmt.Sprintf("%s;not_count=%d", rendered, excluded)
+}
+
 // MaxUsernameLen bounds the username we are willing to parse.
-const MaxUsernameLen = 512
-const maxOpaqueTokenLen = 128
+const (
+	MaxUsernameLen    = 512
+	maxOpaqueTokenLen = 128
+)
 
 // Parse converts a proxy username into a Policy. An empty username yields an
 // unconstrained policy. Unknown directives are rejected so that typos surface
@@ -208,11 +226,14 @@ func (p *Policy) validate() error {
 		}
 	}
 	for _, cc := range p.Countries {
-		if len(cc) != 2 {
+		if !isASCIICountryCode(cc) {
 			return fmt.Errorf("policy: cc=%q is not a 2-letter country code", cc)
 		}
 	}
 	for _, city := range p.Cities {
+		if !isSafeOpaqueToken(city) {
+			return fmt.Errorf("policy: city contains unsafe characters")
+		}
 		if !strings.Contains(city, "-") {
 			return fmt.Errorf("policy: city=%q should look like \"us-lax\"", city)
 		}
@@ -257,6 +278,12 @@ func isSafeOpaqueToken(value string) bool {
 		return false
 	}
 	return true
+}
+
+func isASCIICountryCode(value string) bool {
+	return len(value) == 2 &&
+		value[0] >= 'a' && value[0] <= 'z' &&
+		value[1] >= 'a' && value[1] <= 'z'
 }
 
 func appendLower(dst []string, value string) []string {

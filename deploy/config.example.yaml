@@ -81,6 +81,9 @@ pool:
   session_ttl: 10m
   # How long a unique-IP batch (uniq=...) remembers the IPs it used.
   batch_ttl: 15m
+  # Maximum number of concurrently active unique-IP batches. This bounds
+  # attacker-controlled uniq= names retained during batch_ttl.
+  max_unique_batches: 10000
   # Default cooldown applied when a client reports a block.
   cooldown: 15m
   # Close tunnels that have served nothing for this long.

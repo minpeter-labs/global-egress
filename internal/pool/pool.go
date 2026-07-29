@@ -40,6 +40,8 @@ var (
 	// ErrBusy means the concurrent-connection limit is reached. Unlike the other
 	// failures this one is purely about load and clears as connections finish.
 	ErrBusy = errors.New("pool: too many concurrent connections")
+	// ErrBatchFull means the active unique-IP batch limit has been reached.
+	ErrBatchFull = errors.New("pool: active unique-IP batch limit reached")
 )
 
 // Options configures a Pool.
@@ -62,6 +64,9 @@ type Options struct {
 	SessionTTL time.Duration
 	// BatchTTL is how long a unique-IP batch remembers the IPs it used.
 	BatchTTL time.Duration
+	// MaxUniqueBatches caps concurrently active unique-IP batches. Zero uses the
+	// safe default.
+	MaxUniqueBatches int
 	// Cooldown is the default per-target cooldown applied by Report.
 	Cooldown time.Duration
 	// IdleTimeout closes tunnels that have served nothing for this long.
@@ -113,6 +118,9 @@ func (o *Options) applyDefaults() {
 	}
 	if o.BatchTTL <= 0 {
 		o.BatchTTL = 15 * time.Minute
+	}
+	if o.MaxUniqueBatches <= 0 {
+		o.MaxUniqueBatches = 10_000
 	}
 	if o.Cooldown <= 0 {
 		o.Cooldown = 15 * time.Minute
@@ -209,7 +217,67 @@ type session struct {
 type batch struct {
 	usedIPs   map[netip.Addr]struct{}
 	usedSlots map[string]struct{}
+	// slotIPs retains the addresses attributed to each reservation so a failed
+	// dial can release only its own addresses after a measurement backfill.
+	slotIPs   map[string]map[netip.Addr]struct{}
 	expiresAt time.Time
+}
+
+func newBatch(expiresAt time.Time) *batch {
+	return &batch{
+		usedIPs:   make(map[netip.Addr]struct{}),
+		usedSlots: make(map[string]struct{}),
+		slotIPs:   make(map[string]map[netip.Addr]struct{}),
+		expiresAt: expiresAt,
+	}
+}
+
+func (b *batch) reserve(slotID string, ip netip.Addr) {
+	if b.usedSlots == nil {
+		b.usedSlots = make(map[string]struct{})
+	}
+	b.usedSlots[slotID] = struct{}{}
+	b.addIP(slotID, ip)
+}
+
+func (b *batch) addIP(slotID string, ip netip.Addr) {
+	if !ip.IsValid() {
+		return
+	}
+	if b.usedIPs == nil {
+		b.usedIPs = make(map[netip.Addr]struct{})
+	}
+	if b.slotIPs == nil {
+		b.slotIPs = make(map[string]map[netip.Addr]struct{})
+	}
+	ips := b.slotIPs[slotID]
+	if ips == nil {
+		ips = make(map[netip.Addr]struct{})
+		b.slotIPs[slotID] = ips
+	}
+	if _, exists := ips[ip]; exists {
+		return
+	}
+	ips[ip] = struct{}{}
+	b.usedIPs[ip] = struct{}{}
+}
+
+func (b *batch) release(slotID string) {
+	ips := b.slotIPs[slotID]
+	delete(b.slotIPs, slotID)
+	delete(b.usedSlots, slotID)
+	for ip := range ips {
+		stillUsed := false
+		for _, other := range b.slotIPs {
+			if _, exists := other[ip]; exists {
+				stillUsed = true
+				break
+			}
+		}
+		if !stillUsed {
+			delete(b.usedIPs, ip)
+		}
+	}
 }
 
 // Pool manages the whole slot inventory.
@@ -394,6 +462,7 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 
 		dialer, entryID, err := p.ensureDialer(ctx, state)
 		if err != nil {
+			p.rollbackBatch(pol, state)
 			p.noteFailure(state, err)
 			lastErr = err
 			// A sticky session pointing at a broken slot must not pin the client
@@ -412,7 +481,6 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 		state.lastError = ""
 		publicIP := state.publicIP
 		p.bindSession(pol, state.ID())
-		p.recordBatch(pol, state, publicIP)
 		p.recordAcquisitionLocked(state)
 		p.mu.Unlock()
 
@@ -461,12 +529,14 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 		p.statBusy++
 		return nil, false, ErrBusy
 	}
-
 	// A live sticky session wins, as long as the slot is still usable.
 	if pol.Session != "" {
 		if sess, ok := p.sessions[pol.Session]; ok && now.Before(sess.expiresAt) {
 			if state, ok := p.slots[sess.slotID]; ok && p.eligibleLocked(state, pol, target, now) {
 				sess.expiresAt = now.Add(p.sessionTTL(pol))
+				if err := p.reserveBatchLocked(pol, state, now); err != nil {
+					return nil, false, err
+				}
 				return state, true, nil
 			}
 			// The pinned slot became unusable: fall through and re-pick.
@@ -495,7 +565,11 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 		}
 	}
 	if len(ready) > 0 {
-		return ready[p.rng.IntN(len(ready))], false, nil
+		state := ready[p.rng.IntN(len(ready))]
+		if err := p.reserveBatchLocked(pol, state, now); err != nil {
+			return nil, false, err
+		}
+		return state, false, nil
 	}
 
 	// Only WireGuard slots that need a new tunnel are left, so the tunnel budgets
@@ -507,7 +581,11 @@ func (p *Pool) pick(pol policy.Policy, target string) (*slotState, bool, error) 
 	if err := p.reserveCapacityLocked(); err != nil {
 		return nil, false, err
 	}
-	return candidates[p.rng.IntN(len(candidates))], false, nil
+	state := candidates[p.rng.IntN(len(candidates))]
+	if err := p.reserveBatchLocked(pol, state, now); err != nil {
+		return nil, false, err
+	}
+	return state, false, nil
 }
 
 // eligibleLocked applies every filter that can be evaluated without I/O.
@@ -543,6 +621,9 @@ func (p *Pool) eligibleLocked(state *slotState, pol policy.Policy, target string
 		}
 	}
 	if pol.UniqueBatch != "" {
+		if !state.publicIP.IsValid() {
+			return false
+		}
 		if b, ok := p.batches[pol.UniqueBatch]; ok && now.Before(b.expiresAt) {
 			if _, used := b.usedSlots[state.spec.ID]; used {
 				return false
@@ -723,7 +804,6 @@ func (p *Pool) openTunnel(
 	p.observeTunnelOpen(role, TunnelSuccess, time.Since(started))
 	p.log.Info("tunnel up",
 		slog.String("slot", spec.ID),
-		slog.String("endpoint", spec.Endpoint),
 		slog.Duration("took", time.Since(started)))
 	return tunnel, nil
 }
@@ -766,20 +846,45 @@ func (p *Pool) bindSession(pol policy.Policy, slotID string) {
 	p.sessions[pol.Session] = &session{slotID: slotID, expiresAt: time.Now().Add(p.sessionTTL(pol))}
 }
 
-// recordBatch remembers what a unique-IP batch has consumed. Caller holds mu.
-func (p *Pool) recordBatch(pol policy.Policy, state *slotState, ip netip.Addr) {
+// reserveBatchLocked atomically records a unique batch's selected slot and its
+// current measured public IP. pick has already expired stale batches before
+// calling this, so the active-batch cap covers only live entries. Caller holds mu.
+func (p *Pool) reserveBatchLocked(pol policy.Policy, state *slotState, now time.Time) error {
 	if pol.UniqueBatch == "" {
-		return
+		return nil
 	}
 	b, ok := p.batches[pol.UniqueBatch]
-	if !ok || time.Now().After(b.expiresAt) {
-		b = &batch{usedIPs: make(map[netip.Addr]struct{}), usedSlots: make(map[string]struct{})}
+	if !ok || now.After(b.expiresAt) {
+		if ok {
+			delete(p.batches, pol.UniqueBatch)
+		}
+		if len(p.batches) >= p.opts.MaxUniqueBatches {
+			return ErrBatchFull
+		}
+		b = newBatch(now.Add(p.opts.BatchTTL))
 		p.batches[pol.UniqueBatch] = b
 	}
-	b.expiresAt = time.Now().Add(p.opts.BatchTTL)
-	b.usedSlots[state.spec.ID] = struct{}{}
-	if ip.IsValid() {
-		b.usedIPs[ip] = struct{}{}
+	b.expiresAt = now.Add(p.opts.BatchTTL)
+	b.reserve(state.spec.ID, state.publicIP)
+	return nil
+}
+
+// rollbackBatch releases the tentative unique-batch reservation made before a
+// dialer is opened. A successful Acquire intentionally never calls this.
+func (p *Pool) rollbackBatch(pol policy.Policy, state *slotState) {
+	if pol.UniqueBatch == "" || state == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	b, ok := p.batches[pol.UniqueBatch]
+	if !ok {
+		return
+	}
+	b.release(state.spec.ID)
+	if len(b.usedSlots) == 0 {
+		delete(p.batches, pol.UniqueBatch)
 	}
 }
 

@@ -127,7 +127,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
 			slog.String("target", r.Host),
-			slog.String("policy", pol.String()),
+			policyLogAttr(pol),
 			slog.Any("error", err))
 		http.Error(w, err.Error(), statusCodeFor(err))
 		return
@@ -148,15 +148,10 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	}
 	defer client.Close()
 
-	// Report the chosen egress in the CONNECT response so clients can log or
-	// react to the IP they were given.
-	var header strings.Builder
-	header.WriteString("HTTP/1.1 200 Connection Established\r\n")
-	for key, value := range egressHeaders(lease, pol) {
-		fmt.Fprintf(&header, "%s: %s\r\n", key, value)
-	}
-	header.WriteString("\r\n")
-	if _, err := client.Write([]byte(header.String())); err != nil {
+	// Report the chosen egress in the CONNECT response so clients can react to
+	// the IP they were given. These headers are manually serialized after hijack,
+	// so writeConnectEstablished validates every dynamic value before writing it.
+	if err := writeConnectEstablished(client, lease, pol); err != nil {
 		return
 	}
 
@@ -180,8 +175,8 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	log.Info("session finished",
 		slog.String("target", net.JoinHostPort(host, strconv.Itoa(port))),
 		slog.String("slot", lease.Slot.ID),
-		slog.String("egress_ip", ipString(lease)),
-		slog.String("policy", pol.String()),
+		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
+		policyLogAttr(pol),
 		slog.Int64("sent", sent),
 		slog.Int64("received", received),
 		slog.Duration("duration", time.Since(started)))
@@ -229,7 +224,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	lease, err := s.deps.Pool.Acquire(r.Context(), pol, host)
 	if err != nil {
 		s.deps.observeRequest(pol, nil, requestResult(err), time.Since(started))
-		log.Warn("acquire failed", slog.String("policy", pol.String()), slog.Any("error", err))
+		log.Warn("acquire failed", policyLogAttr(pol), slog.Any("error", err))
 		http.Error(w, err.Error(), statusCodeFor(err))
 		return
 	}
@@ -262,6 +257,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	for _, header := range hopByHopHeaders {
 		outbound.Header.Del(header)
 	}
+	stripEgressHeaders(outbound.Header)
 	// Count the request body on its way out so uploads are not invisible.
 	var uploaded countingReader
 	if outbound.Body != nil {
@@ -282,14 +278,7 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
 	defer resp.Body.Close()
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-	for key, value := range egressHeaders(lease, pol) {
-		w.Header().Set(key, value)
-	}
+	copyForwardResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	written, _ := io.Copy(w, resp.Body)
 	s.deps.Pool.RecordTraffic(lease, uploaded.n, written)
@@ -297,8 +286,8 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	log.Info("request finished",
 		slog.String("target", r.URL.String()),
 		slog.String("slot", lease.Slot.ID),
-		slog.String("egress_ip", ipString(lease)),
-		slog.String("policy", pol.String()),
+		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
+		policyLogAttr(pol),
 		slog.Int("status", resp.StatusCode),
 		slog.Int64("bytes", written),
 		slog.Duration("duration", time.Since(started)))
@@ -318,6 +307,72 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 func (c *countingReader) Close() error { return c.inner.Close() }
+
+// copyForwardResponseHeaders copies an origin response while reserving the
+// X-Egress-* namespace for the CONNECT metadata. Plain HTTP responses must not
+// reveal or spoof egress-selection details.
+func copyForwardResponseHeaders(destination, source http.Header) {
+	for key, values := range source {
+		if isEgressHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			destination.Add(key, value)
+		}
+	}
+}
+
+func stripEgressHeaders(header http.Header) {
+	for key := range header {
+		if isEgressHeader(key) {
+			header.Del(key)
+		}
+	}
+}
+
+func isEgressHeader(key string) bool {
+	return strings.HasPrefix(strings.ToLower(key), "x-egress-")
+}
+
+// writeConnectEstablished writes CONNECT metadata after validating dynamic
+// values. net/http cannot serialize headers once the connection is hijacked, so
+// accepting CR, LF, or other control characters here would permit response
+// splitting from catalog metadata or a manually constructed policy.
+func writeConnectEstablished(w io.Writer, lease *pool.Lease, pol policy.Policy) error {
+	var response strings.Builder
+	response.WriteString("HTTP/1.1 200 Connection Established\r\n")
+	headers := egressHeaders(lease, pol)
+	for _, key := range []string{
+		"X-Egress-Slot",
+		"X-Egress-Country",
+		"X-Egress-City",
+		"X-Egress-IP",
+		"X-Egress-Session",
+		"X-Egress-Policy",
+	} {
+		value, ok := headers[key]
+		if !ok || !validHeaderValue(value) {
+			continue
+		}
+		response.WriteString(key)
+		response.WriteString(": ")
+		response.WriteString(value)
+		response.WriteString("\r\n")
+	}
+	response.WriteString("\r\n")
+	_, err := io.WriteString(w, response.String())
+	return err
+}
+
+func validHeaderValue(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] == '\t' || value[i] >= ' ' && value[i] != 0x7f {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 // egressHeaders describe the chosen slot, and the policy that chose it, to the
 // client.
@@ -400,6 +455,9 @@ func addrFromString(value string) (net.Addr, error) {
 // statusCodeFor maps pool failures to HTTP status codes.
 func statusCodeFor(err error) int {
 	switch {
+	case errors.Is(err, pool.ErrBatchFull):
+		// The shared active-batch map is temporarily at capacity.
+		return http.StatusServiceUnavailable
 	case errors.Is(err, pool.ErrNoCandidate):
 		// The request was understood but no egress matches the policy.
 		return http.StatusConflict

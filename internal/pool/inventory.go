@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -222,6 +223,26 @@ func (p *Pool) Stats() Stats {
 	return stats
 }
 
+// setPublicIPLocked records a measurement and adds it to every live unique batch
+// that has already reserved this slot. Caller holds mu.
+func (p *Pool) setPublicIPLocked(state *slotState, ip netip.Addr, checkedAt time.Time) bool {
+	changed := state.publicIP != ip
+	state.publicIP = ip
+	state.ipCheckedAt = checkedAt
+
+	now := time.Now()
+	for name, b := range p.batches {
+		if now.After(b.expiresAt) {
+			delete(p.batches, name)
+			continue
+		}
+		if _, reserved := b.usedSlots[state.spec.ID]; reserved {
+			b.addIP(state.spec.ID, ip)
+		}
+	}
+	return changed
+}
+
 // maybeCheckIP measures a slot's public IP in the background when the cached
 // value is missing or stale.
 func (p *Pool) maybeCheckIP(state *slotState) {
@@ -271,18 +292,16 @@ func (p *Pool) maybeCheckIP(state *slotState) {
 
 		ip, err := FetchPublicIP(ctx, dialer, p.opts.IPCheckURL)
 		if err != nil {
-			p.log.Debug("public IP check failed",
-				slog.String("slot", state.spec.ID), slog.Any("error", err))
+			// Fetch errors can include an operator-configured echo URL or response
+			// text, so do not reflect them into operational logs.
+			p.log.Debug("public IP check failed", slog.String("slot", state.spec.ID))
 			return
 		}
 		p.mu.Lock()
-		changed := state.publicIP != ip
-		state.publicIP = ip
-		state.ipCheckedAt = time.Now()
+		changed := p.setPublicIPLocked(state, ip, time.Now())
 		p.mu.Unlock()
 		if changed {
-			p.log.Info("public IP measured",
-				slog.String("slot", state.spec.ID), slog.String("public_ip", ip.String()))
+			p.log.Info("public IP measured", slog.String("slot", state.spec.ID))
 		}
 	})
 	if !started {
@@ -339,11 +358,7 @@ func FetchPublicIP(ctx context.Context, dialer Dialer, url string) (netip.Addr, 
 			return addr, nil
 		}
 	}
-	preview := text
-	if len(preview) > 80 {
-		preview = preview[:80] + "..."
-	}
-	return netip.Addr{}, fmt.Errorf("ip check: cannot parse response %q", preview)
+	return netip.Addr{}, errors.New("ip check: cannot parse response")
 }
 
 // ProbeResult is one measurement produced by Probe.
@@ -493,8 +508,7 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 				} else {
 					result.PublicIP = ip.String()
 					p.mu.Lock()
-					st.publicIP = ip
-					st.ipCheckedAt = time.Now()
+					p.setPublicIPLocked(st, ip, time.Now())
 					st.failures = 0
 					st.lastError = ""
 					st.disabledUntil = time.Time{}
@@ -606,8 +620,7 @@ func (p *Pool) LoadInventory(path string) (int, error) {
 		if err != nil {
 			continue
 		}
-		state.publicIP = addr
-		state.ipCheckedAt = entry.CheckedAt
+		p.setPublicIPLocked(state, addr, entry.CheckedAt)
 		restored++
 	}
 	return restored, nil

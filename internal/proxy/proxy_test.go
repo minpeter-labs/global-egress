@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +204,7 @@ func TestSplitTargetHostPort(t *testing.T) {
 func TestStatusCodeFor(t *testing.T) {
 	cases := map[error]int{
 		pool.ErrNoCandidate: http.StatusConflict,
+		pool.ErrBatchFull:   http.StatusServiceUnavailable,
 		pool.ErrCapacity:    http.StatusServiceUnavailable,
 		pool.ErrExhausted:   http.StatusBadGateway,
 		errors.New("other"): http.StatusBadGateway,
@@ -217,6 +220,7 @@ func TestReplyCodeFor(t *testing.T) {
 	cases := map[error]byte{
 		nil:                                      repSuccess,
 		pool.ErrNoCandidate:                      repNotAllowed,
+		pool.ErrBatchFull:                        repGeneralFailure,
 		pool.ErrCapacity:                         repNotAllowed,
 		pool.ErrExhausted:                        repHostUnreachable,
 		context.DeadlineExceeded:                 repHostUnreachable,
@@ -230,17 +234,65 @@ func TestReplyCodeFor(t *testing.T) {
 	}
 }
 
-func TestIPString(t *testing.T) {
-	if got := ipString(nil); got != "unknown" {
-		t.Errorf("ipString(nil) = %q", got)
+func TestWriteConnectEstablishedSkipsUnsafeHeaderValues(t *testing.T) {
+	lease := &pool.Lease{Slot: pool.Spec{
+		ID:      "jp-tyo\r\nX-Injected: yes",
+		Country: "jp",
+		City:    "jp-tyo",
+	}}
+	var response bytes.Buffer
+	if err := writeConnectEstablished(&response, lease, policy.Policy{}); err != nil {
+		t.Fatalf("writeConnectEstablished: %v", err)
 	}
-	lease := &pool.Lease{}
-	if got := ipString(lease); got != "unknown" {
-		t.Errorf("ipString(unmeasured) = %q, want unknown", got)
+
+	text := response.String()
+	if !strings.HasPrefix(text, "HTTP/1.1 200 Connection Established\r\n") {
+		t.Errorf("CONNECT response = %q", text)
 	}
-	lease.PublicIP = netip.MustParseAddr("203.0.113.4")
-	if got := ipString(lease); got != "203.0.113.4" {
-		t.Errorf("ipString = %q", got)
+	if strings.Contains(text, "X-Injected") || strings.Contains(text, "\r\nX-Egress-Slot:") {
+		t.Errorf("unsafe slot escaped into CONNECT response: %q", text)
+	}
+	if !strings.Contains(text, "X-Egress-Country: jp\r\n") {
+		t.Errorf("safe headers missing from CONNECT response: %q", text)
+	}
+}
+
+func TestCopyForwardResponseHeadersDropsEgressHeaders(t *testing.T) {
+	source := http.Header{
+		"Content-Type":    {"text/plain"},
+		"X-Egress-Slot":   {"should-not-leak"},
+		"X-Egress-Policy": {"should-not-leak"},
+	}
+	destination := make(http.Header)
+	copyForwardResponseHeaders(destination, source)
+
+	if got := destination.Get("Content-Type"); got != "text/plain" {
+		t.Errorf("Content-Type = %q, want text/plain", got)
+	}
+	for key := range destination {
+		if strings.HasPrefix(key, "X-Egress-") {
+			t.Errorf("plain HTTP response preserved %s", key)
+		}
+	}
+}
+
+func TestPolicyLogAttributeRedactsExcludedIPs(t *testing.T) {
+	pol, err := policy.Parse("cc=jp;not=203.0.113.4|198.51.100.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	logger.Info("request", policyLogAttr(pol))
+
+	for _, ip := range []string{"203.0.113.4", "198.51.100.8"} {
+		if strings.Contains(output.String(), ip) {
+			t.Errorf("operational log leaked excluded IP %q: %s", ip, output.String())
+		}
+	}
+	if !strings.Contains(output.String(), "not_count=2") {
+		t.Errorf("operational log omitted the excluded-IP count: %s", output.String())
 	}
 }
 

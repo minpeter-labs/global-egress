@@ -182,11 +182,10 @@ So write `cc=jp:x`. Any non-empty password works; nothing checks it unless
 
 Two things help catch the mistake anyway:
 
-- **`X-Egress-Policy`** reports the policy the server actually parsed, so `(any)`
-  where you expected `cc=jp` is visible. Note where it is visible: on plain `http://`
-  responses, and on the `CONNECT` response for `https://`. It is *not* inside the
-  encrypted response, so most HTTPS clients will not surface it — `curl -x … -D -`
-  will.
+- **`X-Egress-Policy`** reports the policy the server actually parsed on the
+  successful `CONNECT` response. It is *not* copied into plain HTTP origin
+  responses or the encrypted HTTPS response, so the transport must inspect the
+  proxy handshake when it needs this diagnostic.
 - **`access.require_policy: true`** refuses directiveless requests outright, which is
   the safeguard that works regardless of protocol:
 
@@ -214,7 +213,7 @@ Two things help catch the mistake anyway:
   distinguishes the two cases as well: `X-Egress-Policy: any=1` versus
   `X-Egress-Policy: (none)`.
 
-Every response reports the egress that served it:
+Successful `CONNECT` responses report the egress that serves the tunnel:
 
 ```text
 X-Egress-Slot: jp-tyo-wg-socks5-001
@@ -224,6 +223,10 @@ X-Egress-IP: 203.0.113.7
 X-Egress-Session: job-1
 X-Egress-Policy: cc=jp;sess=job-1
 ```
+
+Plain HTTP forwarding reserves the `X-Egress-*` namespace for proxy control
+metadata: those headers are removed in both directions and are never exposed as
+origin response headers.
 
 ### Distinct-exit retry chains
 
@@ -236,20 +239,31 @@ attempt 2: any=1;sess=req-42-a2;uniq=req-42
 attempt 3: any=1;sess=req-42-a3;uniq=req-42
 ```
 
-The pool records both the selected slot and its measured public IP against the
-batch. Later attempts cannot reuse either one. When every eligible distinct
-exit has been consumed, acquisition fails with `409 Conflict` instead of
-silently returning a duplicate. `not=` remains available for callers that
-already hold an explicit public-IP exclusion list.
+The pool atomically reserves both the selected slot and its measured public IP
+against the batch before releasing the selection lock. A failed tunnel setup
+rolls that reservation back. Later attempts cannot reuse either identity, even
+when requests carrying the same `uniq=` arrive concurrently.
+
+Unknown public IPs are not eligible for `uniq=` selection: the inventory must
+measure them first, otherwise the request fails closed rather than weakening
+the distinctness guarantee. A later IP refresh is backfilled into every live
+batch that consumed the slot. When every eligible distinct exit has been
+consumed, acquisition fails with `409 Conflict` instead of silently returning
+a duplicate. `not=` remains available for callers that already hold an explicit
+public-IP exclusion list.
+
+Active unique batches are bounded by `pool.max_unique_batches` (default
+`10000`). Capacity exhaustion is a temporary `503 Service Unavailable`; expired
+batches are pruned before the limit is applied.
 
 For HTTPS, the `X-Egress-*` values are on the successful `CONNECT` response,
 not the encrypted origin response. A custom proxy transport must capture those
 headers before it starts TLS. It can use `X-Egress-IP` as the source-IP quota
 identity without logging or forwarding it to the application response.
 
-`slot=`, `sess=`, and `uniq=` accept only ASCII letters, digits, `.`, `_`, and
-`-`, up to 128 characters. This keeps values safe when they are echoed in
-`CONNECT` response headers.
+`city=`, `slot=`, `sess=`, and `uniq=` accept only ASCII letters, digits, `.`,
+`_`, and `-`, up to 128 characters. Every manually serialized CONNECT value is
+also checked for control characters at the final write boundary.
 
 ### Rotating when a site blocks you
 

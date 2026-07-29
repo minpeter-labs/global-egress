@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,7 +80,9 @@ func TestParseRejectsBadInput(t *testing.T) {
 		"unknown directive":    "contry=jp",
 		"empty value":          "cc=",
 		"bad country":          "cc=japan",
+		"unsafe country":       "cc=\x00a",
 		"bad city":             "city=lax",
+		"unsafe city":          "city=us-lax\r\nX-Injected: yes",
 		"not an ip":            "not=example.com",
 		"negative ttl":         "ttl=-5",
 		"unparsable ttl":       "ttl=soon",
@@ -123,6 +126,23 @@ func TestStringRoundTrips(t *testing.T) {
 	}
 	if reparsed.String() != pol.String() {
 		t.Errorf("round trip changed the policy: %q -> %q", pol.String(), reparsed.String())
+	}
+}
+
+func TestLogStringRedactsExcludedIPs(t *testing.T) {
+	t.Parallel()
+	pol, err := Parse("cc=jp;not=203.0.113.4|198.51.100.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := pol.LogString()
+	if got != "cc=jp;not_count=2" {
+		t.Errorf("LogString() = %q, want redacted count", got)
+	}
+	for _, ip := range []string{"203.0.113.4", "198.51.100.8"} {
+		if strings.Contains(got, ip) {
+			t.Errorf("LogString() leaked %q: %q", ip, got)
+		}
 	}
 }
 
