@@ -498,13 +498,13 @@ func (p *Pool) Probe(ctx context.Context, opts ProbeOptions) []ProbeResult {
 
 			dialer, closer, err := p.probeDialer(ctx, st)
 			if err != nil {
-				result.Err = err.Error()
+				result.Err = redactedError(err)
 			} else {
 				ipCtx, cancel := context.WithTimeout(ctx, p.opts.IPCheckTimeout)
 				ip, ipErr := FetchPublicIP(ipCtx, dialer, p.opts.IPCheckURL)
 				cancel()
 				if ipErr != nil {
-					result.Err = ipErr.Error()
+					result.Err = redactedError(ipErr)
 				} else {
 					result.PublicIP = ip.String()
 					p.mu.Lock()

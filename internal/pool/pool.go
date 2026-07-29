@@ -229,6 +229,10 @@ type batchReservation struct {
 	slotID string
 }
 
+func redactedError(err error) string {
+	return fmt.Sprintf("%T", err)
+}
+
 func newBatch(expiresAt time.Time) *batch {
 	return &batch{
 		usedIPs:   make(map[netip.Addr]struct{}),
@@ -703,7 +707,7 @@ func (p *Pool) closeLocked(state *slotState, reason string) {
 		if err := tunnel.Close(); err != nil {
 			p.log.Warn("tunnel close failed",
 				slog.String("slot", id),
-				slog.String("error_type", fmt.Sprintf("%T", err)))
+				slog.String("error_type", redactedError(err)))
 		}
 	}()
 }
@@ -828,7 +832,7 @@ func (p *Pool) noteFailure(state *slotState, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	state.failures++
-	state.lastError = fmt.Sprintf("%T", err)
+	state.lastError = redactedError(err)
 	p.statFailures++
 	// Exponential backoff, capped, so a dead server stops being retried without
 	// being removed from the catalog.
@@ -844,7 +848,7 @@ func (p *Pool) noteFailure(state *slotState, err error) {
 		slog.String("slot", state.spec.ID),
 		slog.Int("failures", state.failures),
 		slog.Duration("backoff", backoff),
-		slog.String("error_type", fmt.Sprintf("%T", err)))
+		slog.String("error_type", redactedError(err)))
 }
 
 func (p *Pool) sessionTTL(pol policy.Policy) time.Duration {

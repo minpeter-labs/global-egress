@@ -31,11 +31,11 @@ func decodeBase64Key(key string) ([]byte, error) {
 func newDeviceLogger(logger *slog.Logger, slotID string) *device.Logger {
 	scoped := logger.With(slog.String("slot", slotID), slog.String("component", "wireguard"))
 	return &device.Logger{
-		Verbosef: func(format string, args ...any) {
-			scoped.Debug(fmt.Sprintf(format, args...))
+		Verbosef: func(_ string, _ ...any) {
+			scoped.Debug("wireguard device event")
 		},
-		Errorf: func(format string, args ...any) {
-			scoped.Warn(fmt.Sprintf(format, args...))
+		Errorf: func(_ string, _ ...any) {
+			scoped.Warn("wireguard device error")
 		},
 	}
 }
