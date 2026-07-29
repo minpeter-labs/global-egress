@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -134,6 +135,55 @@ func TestFetchBadStatus(t *testing.T) {
 	if _, err := Fetch(context.Background(), server.URL); err == nil {
 		t.Error("expected an error for a 500 response")
 	}
+}
+
+func TestFetchErrorsDoNotExposeConfiguredURL(t *testing.T) {
+	const secret = "relay-secret"
+	assertPrivate := func(t *testing.T, configuredURL string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("expected fetch error")
+		}
+		message := err.Error()
+		if strings.Contains(message, secret) || strings.Contains(message, configuredURL) {
+			t.Fatalf("error exposed configured URL: %q", message)
+		}
+	}
+
+	t.Run("invalid request URL", func(t *testing.T) {
+		configuredURL := "://relay.invalid/relays?token=" + secret
+		_, err := Fetch(context.Background(), configuredURL)
+		assertPrivate(t, configuredURL, err)
+	})
+
+	t.Run("network failure", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		configuredURL := server.URL + "/relays?token=" + secret
+		server.Close()
+		_, err := Fetch(context.Background(), configuredURL)
+		assertPrivate(t, configuredURL, err)
+	})
+
+	t.Run("non-OK status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		}))
+		defer server.Close()
+		configuredURL := server.URL + "/relays?token=" + secret
+		_, err := Fetch(context.Background(), configuredURL)
+		assertPrivate(t, configuredURL, err)
+	})
+
+	t.Run("truncated response body", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "10")
+			_, _ = w.Write([]byte("x"))
+		}))
+		defer server.Close()
+		configuredURL := server.URL + "/relays?token=" + secret
+		_, err := Fetch(context.Background(), configuredURL)
+		assertPrivate(t, configuredURL, err)
+	})
 }
 
 func TestLoadOrFetchUsesFreshCache(t *testing.T) {

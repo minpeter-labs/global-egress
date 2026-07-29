@@ -154,22 +154,22 @@ func Fetch(ctx context.Context, url string) (*List, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mullvad: create relay request failed (%T)", err)
 	}
 	req.Header.Set("User-Agent", "global-egress/relaylist")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("mullvad: fetch %s: %w", url, err)
+		return nil, fmt.Errorf("mullvad: relay fetch failed (%T)", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mullvad: fetch %s: unexpected status %s", url, resp.Status)
+		return nil, fmt.Errorf("mullvad: relay fetch returned %s", resp.Status)
 	}
 	blob, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, fmt.Errorf("mullvad: read %s: %w", url, err)
+		return nil, fmt.Errorf("mullvad: relay response read failed (%T)", err)
 	}
 	return parse(blob)
 }
