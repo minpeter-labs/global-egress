@@ -206,6 +206,7 @@ func TestValidate(t *testing.T) {
 		"no listeners":            func(c *Config) { c.Listen.SOCKS5 = ""; c.Listen.HTTP = "" },
 		"bad client cidr":         func(c *Config) { c.Access.AllowedClients = []string{"nope"} },
 		"bad denied cidr":         func(c *Config) { c.Destinations.DeniedCIDRs = []string{"nope"} },
+		"auth without password":   func(c *Config) { c.Access.RequireAuth = true; c.Access.Password = "  " },
 		"negative max_active":     func(c *Config) { c.Pool.MaxActive = -1 },
 		"zero unique batch limit": func(c *Config) { c.Pool.MaxUniqueBatches = 0 },
 		"zero session limit":      func(c *Config) { c.Pool.MaxSessions = 0 },

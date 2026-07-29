@@ -301,6 +301,9 @@ func (c *Config) Validate() error {
 	if _, err := c.AllowedClientPrefixes(); err != nil {
 		return err
 	}
+	if c.Access.RequireAuth && strings.TrimSpace(c.Access.Password) == "" {
+		return fmt.Errorf("config: access.require_auth needs a non-empty password")
+	}
 	if _, err := netguard.New(c.Destinations.DeniedCIDRs, c.Destinations.AllowedPorts); err != nil {
 		return err
 	}
