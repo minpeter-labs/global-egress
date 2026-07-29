@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/minpeter/global-egress/internal/policy"
@@ -84,11 +83,10 @@ func (s *SOCKS5Server) Serve(ctx context.Context, listener net.Listener) error {
 
 func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	defer client.Close()
-	log := s.deps.Logger.With(slog.String("proto", "socks5"),
-		slog.String("client", client.RemoteAddr().String()))
+	log := s.deps.Logger.With(slog.String("proto", "socks5"))
 
 	if err := s.deps.checkClient(client.RemoteAddr()); err != nil {
-		log.Warn("client rejected", slog.Any("error", err))
+		log.Warn("client rejected", errorTypeAttr(err))
 		return
 	}
 
@@ -111,19 +109,17 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 
 	host, port, err := readRequest(client)
 	if err != nil {
-		log.Debug("bad request", slog.Any("error", err))
+		log.Debug("bad request", errorTypeAttr(err))
 		return
 	}
 
-	target := net.JoinHostPort(host, strconv.Itoa(port))
 	started := time.Now()
 	upstream, lease, err := s.deps.connectUpstream(ctx, pol, host, port)
 	if err != nil {
 		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
-			slog.String("target", target),
 			policyLogAttr(pol),
-			slog.Any("error", err))
+			errorTypeAttr(err))
 		_ = writeReply(client, replyCodeFor(err), nil)
 		return
 	}
@@ -132,7 +128,7 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	defer upstream.Close()
 
 	if err := writeReply(client, repSuccess, upstream.LocalAddr()); err != nil {
-		log.Debug("reply failed", slog.Any("error", err))
+		log.Debug("reply failed", errorTypeAttr(err))
 		return
 	}
 
@@ -143,7 +139,6 @@ func (s *SOCKS5Server) handle(ctx context.Context, client net.Conn) {
 	sent, received := relay(client, upstream, s.deps.IdleTimeout)
 	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",
-		slog.String("target", target),
 		slog.String("slot", lease.Slot.ID),
 		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
 		policyLogAttr(pol),

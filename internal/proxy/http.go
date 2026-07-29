@@ -60,19 +60,18 @@ func (s *HTTPServer) Serve(ctx context.Context, listener net.Listener) error {
 
 // ServeHTTP implements the proxy.
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log := s.deps.Logger.With(slog.String("proto", "http"),
-		slog.String("client", r.RemoteAddr))
+	log := s.deps.Logger.With(slog.String("proto", "http"))
 
 	remote, err := addrFromString(r.RemoteAddr)
 	if err != nil {
 		// Access checks must fail closed. RemoteAddr is normally supplied by the
 		// HTTP server as host:port, so an unparsable value is not a valid client.
-		log.Warn("client address rejected", slog.Any("error", err))
+		log.Warn("client address rejected", errorTypeAttr(err))
 		http.Error(w, "client not allowed", http.StatusForbidden)
 		return
 	}
 	if err := s.deps.checkClient(remote); err != nil {
-		log.Warn("client rejected", slog.Any("error", err))
+		log.Warn("client rejected", errorTypeAttr(err))
 		http.Error(w, "client not allowed", http.StatusForbidden)
 		return
 	}
@@ -96,8 +95,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.StatusProxyAuthRequired)
 			return
 		}
-		// A malformed policy is the client's mistake; say so precisely.
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid proxy policy", http.StatusBadRequest)
 		return
 	}
 
@@ -117,7 +115,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol policy.Policy, log *slog.Logger) {
 	host, port, err := splitTargetHostPort(r.Host, 443)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid CONNECT target", http.StatusBadRequest)
 		return
 	}
 
@@ -126,10 +124,9 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	if err != nil {
 		s.deps.observeRequest(pol, lease, requestResult(err), time.Since(started))
 		log.Warn("connect failed",
-			slog.String("target", r.Host),
 			policyLogAttr(pol),
-			slog.Any("error", err))
-		http.Error(w, err.Error(), statusCodeFor(err))
+			errorTypeAttr(err))
+		http.Error(w, "CONNECT failed", statusCodeFor(err))
 		return
 	}
 	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
@@ -143,7 +140,7 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	}
 	client, buffered, err := hijacker.Hijack()
 	if err != nil {
-		log.Warn("hijack failed", slog.Any("error", err))
+		log.Warn("hijack failed", errorTypeAttr(err))
 		return
 	}
 	defer client.Close()
@@ -173,7 +170,6 @@ func (s *HTTPServer) handleConnect(w http.ResponseWriter, r *http.Request, pol p
 	sent += pipelined
 	s.deps.Pool.RecordTraffic(lease, sent, received)
 	log.Info("session finished",
-		slog.String("target", net.JoinHostPort(host, strconv.Itoa(port))),
 		slog.String("slot", lease.Slot.ID),
 		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
 		policyLogAttr(pol),
@@ -199,7 +195,7 @@ var hopByHopHeaders = []string{
 func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol policy.Policy, log *slog.Logger) {
 	host, port, err := splitTargetHostPort(r.URL.Host, 80)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid HTTP proxy target", http.StatusBadRequest)
 		return
 	}
 	if r.URL.Scheme != "http" {
@@ -212,11 +208,11 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	// unnecessary work, this prevents denied requests from binding sessions or
 	// consuming a unique-batch slot.
 	if err := s.deps.Guard.CheckPort(port); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		http.Error(w, "HTTP proxy target rejected", http.StatusForbidden)
 		return
 	}
 	if err := s.deps.Guard.CheckHost(host); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		http.Error(w, "HTTP proxy target rejected", http.StatusForbidden)
 		return
 	}
 
@@ -224,8 +220,8 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	lease, err := s.deps.Pool.Acquire(r.Context(), pol, host)
 	if err != nil {
 		s.deps.observeRequest(pol, nil, requestResult(err), time.Since(started))
-		log.Warn("acquire failed", policyLogAttr(pol), slog.Any("error", err))
-		http.Error(w, err.Error(), statusCodeFor(err))
+		log.Warn("acquire failed", policyLogAttr(pol), errorTypeAttr(err))
+		http.Error(w, "egress unavailable", statusCodeFor(err))
 		return
 	}
 	defer lease.Release()
@@ -269,10 +265,9 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	if err != nil {
 		s.deps.observeRequest(pol, lease, upstreamResult(err), time.Since(started))
 		log.Warn("upstream request failed",
-			slog.String("target", r.URL.String()),
 			slog.String("slot", lease.Slot.ID),
-			slog.Any("error", err))
-		http.Error(w, err.Error(), http.StatusBadGateway)
+			errorTypeAttr(err))
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
 	s.deps.observeRequest(pol, lease, pool.RequestSuccess, time.Since(started))
@@ -284,7 +279,6 @@ func (s *HTTPServer) handleForward(w http.ResponseWriter, r *http.Request, pol p
 	s.deps.Pool.RecordTraffic(lease, uploaded.n, written)
 
 	log.Info("request finished",
-		slog.String("target", r.URL.String()),
 		slog.String("slot", lease.Slot.ID),
 		slog.Bool("egress_ip_measured", lease.PublicIP.IsValid()),
 		policyLogAttr(pol),

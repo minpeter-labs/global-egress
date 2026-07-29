@@ -80,6 +80,10 @@ func policyLogAttr(pol policy.Policy) slog.Attr {
 	return slog.String("policy", pol.LogString())
 }
 
+func errorTypeAttr(err error) slog.Attr {
+	return slog.String("error_type", fmt.Sprintf("%T", err))
+}
+
 // checkClient enforces the client ACL.
 func (d *Deps) checkClient(remote net.Addr) error {
 	if len(d.AllowedClients) == 0 {
@@ -157,12 +161,11 @@ func (d *Deps) connectUpstream(ctx context.Context, pol policy.Policy, host stri
 		// Back the slot off and let the next attempt choose another one.
 		d.Pool.NoteDialFailure(lease, err)
 		lease.Release()
-		lastErr = fmt.Errorf("proxy: dial %s via %s: %w", address, lease.Slot.ID, err)
+		lastErr = fmt.Errorf("proxy: dial target via %s: %w", lease.Slot.ID, err)
 		d.Logger.Debug("egress attempt failed",
-			slog.String("target", address),
 			slog.String("slot", lease.Slot.ID),
 			slog.Int("attempt", attempt+1),
-			slog.Any("error", err))
+			errorTypeAttr(err))
 	}
 	return nil, nil, lastErr
 }

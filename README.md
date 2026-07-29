@@ -244,13 +244,16 @@ against the batch before releasing the selection lock. A failed tunnel setup
 rolls that reservation back. Later attempts cannot reuse either identity, even
 when requests carrying the same `uniq=` arrive concurrently.
 
-Unknown public IPs are not eligible for `uniq=` selection: the inventory must
-measure them first, otherwise the request fails closed rather than weakening
-the distinctness guarantee. A later IP refresh is backfilled into every live
-batch that consumed the slot. When every eligible distinct exit has been
-consumed, acquisition fails with `409 Conflict` instead of silently returning
-a duplicate. `not=` remains available for callers that already hold an explicit
-public-IP exclusion list.
+Unknown or stale public IPs are not eligible for `uniq=` selection: the
+inventory must hold a measurement newer than `pool.ip_refresh_interval`,
+otherwise the request fails closed rather than weakening the distinctness
+guarantee. A later IP refresh is backfilled into every live batch that consumed
+the slot. Tentative reservations carry the exact batch generation so a failed,
+expired request cannot roll back a newer batch with the same name. When every
+eligible distinct exit has been consumed, acquisition fails with `409 Conflict`
+instead of silently returning a duplicate. `not=` remains available for
+callers that already hold an explicit public-IP exclusion list; it uses the
+same fresh-measurement requirement.
 
 Active unique batches are bounded by `pool.max_unique_batches` (default
 `10000`). Capacity exhaustion is a temporary `503 Service Unavailable`; expired
@@ -260,6 +263,8 @@ For HTTPS, the `X-Egress-*` values are on the successful `CONNECT` response,
 not the encrypted origin response. A custom proxy transport must capture those
 headers before it starts TLS. It can use `X-Egress-IP` as the source-IP quota
 identity without logging or forwarding it to the application response.
+Operational proxy logs also omit raw client and destination addresses; failures
+retain only an error type and slot identity, and HTTP error bodies are generic.
 
 `city=`, `slot=`, `sess=`, and `uniq=` accept only ASCII letters, digits, `.`,
 `_`, and `-`, up to 128 characters. Every manually serialized CONNECT value is

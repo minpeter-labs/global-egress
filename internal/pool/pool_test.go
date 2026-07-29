@@ -60,6 +60,11 @@ func newTestPool(t *testing.T, opts Options) *Pool {
 	return p
 }
 
+func setFreshPublicIP(state *slotState, ip netip.Addr) {
+	state.publicIP = ip
+	state.ipCheckedAt = time.Now()
+}
+
 func TestNewRejectsEmptyBundle(t *testing.T) {
 	if _, err := New(&catalog.Bundle{}, Options{}); err == nil {
 		t.Fatal("expected an error for an empty bundle")
@@ -171,13 +176,25 @@ func TestExcludedIPRemovesCandidate(t *testing.T) {
 	ip := netip.MustParseAddr("203.0.113.9")
 
 	p.mu.Lock()
-	p.slots["jp-tyo-wg-001"].publicIP = ip
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], ip)
 	p.slots["jp-tyo-wg-001"].ipCheckedAt = time.Now()
 	p.mu.Unlock()
 
 	pol := policy.Policy{Slot: "jp-tyo-wg-001", ExcludeIPs: []netip.Addr{ip}}
 	if _, err := p.Acquire(context.Background(), pol, "example.com"); !errors.Is(err, ErrNoCandidate) {
 		t.Fatalf("error = %v, want ErrNoCandidate when the only slot's IP is excluded", err)
+	}
+}
+
+func TestExcludedIPRequiresMeasuredCandidate(t *testing.T) {
+	p := newTestPool(t, Options{})
+	pol := policy.Policy{
+		Slot:       "jp-tyo-wg-001",
+		ExcludeIPs: []netip.Addr{netip.MustParseAddr("203.0.113.9")},
+	}
+
+	if _, err := p.Acquire(context.Background(), pol, "example.com"); !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("error = %v, want ErrNoCandidate while the candidate IP is unknown", err)
 	}
 }
 
@@ -280,15 +297,15 @@ func TestUniqueBatchExcludesUsedSlotsAndIPs(t *testing.T) {
 
 	p.mu.Lock()
 	state := p.slots["us-lax-wg-001"]
-	state.publicIP = ip
+	setFreshPublicIP(state, ip)
 	// Record the slot as already served within this batch.
-	if err := p.reserveBatchLocked(policy.Policy{UniqueBatch: "b1"}, state, time.Now()); err != nil {
+	if _, err := p.reserveBatchLocked(policy.Policy{UniqueBatch: "b1"}, state, time.Now()); err != nil {
 		t.Fatalf("reserveBatchLocked: %v", err)
 	}
 	// A different slot that happens to share the same public IP.
 	other := p.slots["us-lax-wg-002"]
-	other.publicIP = ip
-	p.slots["de-fra-wg-001"].publicIP = netip.MustParseAddr("198.51.100.51")
+	setFreshPublicIP(other, ip)
+	setFreshPublicIP(p.slots["de-fra-wg-001"], netip.MustParseAddr("198.51.100.51"))
 	now := time.Now()
 	usedSlot := p.eligibleLocked(state, policy.Policy{UniqueBatch: "b1"}, "", now)
 	sharedIP := p.eligibleLocked(other, policy.Policy{UniqueBatch: "b1"}, "", now)
@@ -309,11 +326,22 @@ func TestUniqueBatchExcludesUsedSlotsAndIPs(t *testing.T) {
 func TestUniqueBatchRequiresMeasuredIP(t *testing.T) {
 	p := newTestPool(t, Options{})
 
-	if _, _, err := p.pick(policy.Policy{Slot: "jp-tyo-wg-001", UniqueBatch: "b1"}, "example.com"); !errors.Is(err, ErrNoCandidate) {
+	if _, _, _, err := p.pick(policy.Policy{Slot: "jp-tyo-wg-001", UniqueBatch: "b1"}, "example.com"); !errors.Is(err, ErrNoCandidate) {
 		t.Fatalf("pick error = %v, want ErrNoCandidate for an unmeasured slot", err)
 	}
 	if got := p.Stats().Batches; got != 0 {
 		t.Errorf("unmeasured unique selection created %d batches, want 0", got)
+	}
+}
+
+func TestUniqueBatchRequiresFreshMeasuredIP(t *testing.T) {
+	p := newTestPool(t, Options{IPRefreshInterval: time.Hour})
+	state := p.slots["jp-tyo-wg-001"]
+	setFreshPublicIP(state, netip.MustParseAddr("203.0.113.10"))
+	state.ipCheckedAt = time.Now().Add(-2 * time.Hour)
+
+	if _, _, _, err := p.pick(policy.Policy{Slot: state.spec.ID, UniqueBatch: "b1"}, "example.com"); !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("pick(stale IP) error = %v, want ErrNoCandidate", err)
 	}
 }
 
@@ -323,33 +351,39 @@ func TestUniqueBatchReservationIsAtomicAndRollsBack(t *testing.T) {
 	ip := netip.MustParseAddr("198.51.100.50")
 
 	p.mu.Lock()
-	p.slots["jp-tyo-wg-001"].publicIP = ip
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], ip)
 	p.mu.Unlock()
 
 	start := make(chan struct{})
-	errs := make(chan error, 2)
+	type result struct {
+		reservation *batchReservation
+		err         error
+	}
+	results := make(chan result, 2)
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, err := p.pick(pol, "example.com")
-			errs <- err
+			_, _, reservation, err := p.pick(pol, "example.com")
+			results <- result{reservation: reservation, err: err}
 		}()
 	}
 	close(start)
 	wg.Wait()
-	close(errs)
+	close(results)
 
 	successes := 0
-	for err := range errs {
-		if err == nil {
+	var winningReservation *batchReservation
+	for result := range results {
+		if result.err == nil {
 			successes++
+			winningReservation = result.reservation
 			continue
 		}
-		if !errors.Is(err, ErrNoCandidate) {
-			t.Errorf("concurrent pick error = %v, want ErrNoCandidate", err)
+		if !errors.Is(result.err, ErrNoCandidate) {
+			t.Errorf("concurrent pick error = %v, want ErrNoCandidate", result.err)
 		}
 	}
 	if successes != 1 {
@@ -369,9 +403,35 @@ func TestUniqueBatchReservationIsAtomicAndRollsBack(t *testing.T) {
 		t.Fatalf("selection did not atomically reserve slot and IP: %+v", batch)
 	}
 
-	p.rollbackBatch(pol, p.slots["jp-tyo-wg-001"])
-	if _, _, err := p.pick(pol, "example.com"); err != nil {
+	p.rollbackBatch(winningReservation)
+	if _, _, _, err := p.pick(pol, "example.com"); err != nil {
 		t.Fatalf("pick after rollback = %v, want the released slot", err)
+	}
+}
+
+func TestUniqueBatchRollbackCannotReleaseRecreatedBatch(t *testing.T) {
+	p := newTestPool(t, Options{BatchTTL: time.Hour})
+	state := p.slots["jp-tyo-wg-001"]
+	setFreshPublicIP(state, netip.MustParseAddr("203.0.113.10"))
+	pol := policy.Policy{Slot: state.spec.ID, UniqueBatch: "recreated"}
+
+	_, _, oldReservation, err := p.pick(pol, "example.com")
+	if err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	oldBatch := p.batches[pol.UniqueBatch]
+	oldBatch.expiresAt = time.Now().Add(-time.Second)
+
+	if _, _, _, err := p.pick(pol, "example.com"); err != nil {
+		t.Fatalf("recreated pick: %v", err)
+	}
+	if p.batches[pol.UniqueBatch] == oldBatch {
+		t.Fatal("expected the expired batch to be replaced")
+	}
+
+	p.rollbackBatch(oldReservation)
+	if _, _, _, err := p.pick(pol, "example.com"); !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("third pick after stale rollback = %v, want ErrNoCandidate", err)
 	}
 }
 
@@ -382,9 +442,9 @@ func TestMeasurementBackfillsConsumingUniqueBatches(t *testing.T) {
 	newIP := netip.MustParseAddr("198.51.100.51")
 
 	p.mu.Lock()
-	p.slots["jp-tyo-wg-001"].publicIP = oldIP
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], oldIP)
 	p.mu.Unlock()
-	state, _, err := p.pick(pol, "example.com")
+	state, _, _, err := p.pick(pol, "example.com")
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -403,7 +463,7 @@ func TestMeasurementBackfillsConsumingUniqueBatches(t *testing.T) {
 func TestUniqueBatchCountLimitIsAtomic(t *testing.T) {
 	p := newTestPool(t, Options{BatchTTL: time.Hour, MaxUniqueBatches: 1})
 	p.mu.Lock()
-	p.slots["jp-tyo-wg-001"].publicIP = netip.MustParseAddr("198.51.100.50")
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], netip.MustParseAddr("198.51.100.50"))
 	p.mu.Unlock()
 
 	start := make(chan struct{})
@@ -414,7 +474,7 @@ func TestUniqueBatchCountLimitIsAtomic(t *testing.T) {
 		go func(batch string) {
 			defer wg.Done()
 			<-start
-			_, _, err := p.pick(policy.Policy{UniqueBatch: batch}, "example.com")
+			_, _, _, err := p.pick(policy.Policy{UniqueBatch: batch}, "example.com")
 			errs <- err
 		}(batch)
 	}
@@ -444,10 +504,10 @@ func TestUniqueBatchCountLimitPrunesExpiredBatches(t *testing.T) {
 	p := newTestPool(t, Options{BatchTTL: time.Hour, MaxUniqueBatches: 1})
 	p.mu.Lock()
 	p.batches["expired"] = newBatch(time.Now().Add(-time.Second))
-	p.slots["jp-tyo-wg-001"].publicIP = netip.MustParseAddr("198.51.100.50")
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], netip.MustParseAddr("198.51.100.50"))
 	p.mu.Unlock()
 
-	if _, _, err := p.pick(policy.Policy{UniqueBatch: "fresh"}, "example.com"); err != nil {
+	if _, _, _, err := p.pick(policy.Policy{UniqueBatch: "fresh"}, "example.com"); err != nil {
 		t.Fatalf("pick after expiry pruning: %v", err)
 	}
 	if got := p.Stats().Batches; got != 1 {
@@ -468,9 +528,9 @@ func TestInventoryRoundTrip(t *testing.T) {
 
 	checked := time.Now().Truncate(time.Second)
 	p.mu.Lock()
-	p.slots["jp-tyo-wg-001"].publicIP = netip.MustParseAddr("203.0.113.1")
+	setFreshPublicIP(p.slots["jp-tyo-wg-001"], netip.MustParseAddr("203.0.113.1"))
 	p.slots["jp-tyo-wg-001"].ipCheckedAt = checked
-	p.slots["us-lax-wg-001"].publicIP = netip.MustParseAddr("203.0.113.2")
+	setFreshPublicIP(p.slots["us-lax-wg-001"], netip.MustParseAddr("203.0.113.2"))
 	p.slots["us-lax-wg-001"].ipCheckedAt = checked
 	p.mu.Unlock()
 

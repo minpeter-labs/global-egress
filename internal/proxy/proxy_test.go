@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -293,6 +294,13 @@ func TestPolicyLogAttributeRedactsExcludedIPs(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "not_count=2") {
 		t.Errorf("operational log omitted the excluded-IP count: %s", output.String())
+	}
+}
+
+func TestErrorTypeAttributeRedactsNetworkDetails(t *testing.T) {
+	attr := errorTypeAttr(fmt.Errorf("dial 203.0.113.9:443: refused"))
+	if got := attr.Value.String(); strings.Contains(got, "203.0.113.9") {
+		t.Fatalf("error type attribute leaked network details: %q", got)
 	}
 }
 

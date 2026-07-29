@@ -313,7 +313,7 @@ func TestTunnelBudgetDoesNotGateRelaySlots(t *testing.T) {
 		t.Fatal("test setup failed: the budget should be spent")
 	}
 
-	state, _, err := p.pick(policy.Policy{}, "example.com")
+	state, _, _, err := p.pick(policy.Policy{}, "example.com")
 	if err != nil {
 		t.Fatalf("pick returned %v; a relay slot needs no new tunnel", err)
 	}
@@ -330,7 +330,7 @@ func TestWireGuardSlotsStillGatedByBudget(t *testing.T) {
 	p := newTestPool(t, Options{NewTunnelBudget: 1, NewTunnelWindow: time.Hour})
 	p.noteTunnelOpen(time.Now())
 
-	if _, _, err := p.pick(policy.Policy{}, "example.com"); !errors.Is(err, ErrTunnelBudget) {
+	if _, _, _, err := p.pick(policy.Policy{}, "example.com"); !errors.Is(err, ErrTunnelBudget) {
 		t.Fatalf("pick error = %v, want ErrTunnelBudget", err)
 	}
 }
@@ -381,7 +381,7 @@ func TestGlobalConnectionLimitRefusesWithErrBusy(t *testing.T) {
 	p.mu.Lock()
 	p.leased = 0
 	p.mu.Unlock()
-	if _, _, err := p.pick(policy.Policy{}, "example.com"); err != nil {
+	if _, _, _, err := p.pick(policy.Policy{}, "example.com"); err != nil {
 		t.Errorf("pick after the load cleared = %v, want success", err)
 	}
 }
