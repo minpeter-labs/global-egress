@@ -122,8 +122,14 @@ type PoolConfig struct {
 	MaxConcurrentConns int `yaml:"max_concurrent_conns"`
 	// SessionTTL is the default sticky-session lifetime.
 	SessionTTL time.Duration `yaml:"session_ttl"`
+	// MaxSessionTTL caps a client-selected sticky-session lifetime.
+	MaxSessionTTL time.Duration `yaml:"max_session_ttl"`
+	// MaxSessions caps concurrently retained sticky-session names.
+	MaxSessions int `yaml:"max_sessions"`
 	// BatchTTL is how long a unique-IP batch is remembered.
 	BatchTTL time.Duration `yaml:"batch_ttl"`
+	// MaxBatchTTL caps a client-selected unique-batch lifetime.
+	MaxBatchTTL time.Duration `yaml:"max_batch_ttl"`
 	// MaxUniqueBatches caps concurrently active unique-IP batches.
 	MaxUniqueBatches int `yaml:"max_unique_batches"`
 	// Cooldown is the default per-target cooldown applied by a report.
@@ -204,7 +210,10 @@ func Default() Config {
 			MaxConcurrentConns:  256,
 			Preopen:             0,
 			SessionTTL:          10 * time.Minute,
+			MaxSessionTTL:       24 * time.Hour,
+			MaxSessions:         10_000,
 			BatchTTL:            15 * time.Minute,
+			MaxBatchTTL:         15 * time.Minute,
 			MaxUniqueBatches:    10_000,
 			Cooldown:            15 * time.Minute,
 			IdleTimeout:         10 * time.Minute,
@@ -292,6 +301,9 @@ func (c *Config) Validate() error {
 	if _, err := c.AllowedClientPrefixes(); err != nil {
 		return err
 	}
+	if c.Access.RequireAuth && strings.TrimSpace(c.Access.Password) == "" {
+		return fmt.Errorf("config: access.require_auth needs a non-empty password")
+	}
 	if _, err := netguard.New(c.Destinations.DeniedCIDRs, c.Destinations.AllowedPorts); err != nil {
 		return err
 	}
@@ -309,6 +321,21 @@ func (c *Config) Validate() error {
 	}
 	if c.Pool.MaxUniqueBatches <= 0 {
 		return fmt.Errorf("config: pool.max_unique_batches must be positive")
+	}
+	if c.Pool.MaxSessions <= 0 {
+		return fmt.Errorf("config: pool.max_sessions must be positive")
+	}
+	if c.Pool.SessionTTL <= 0 {
+		return fmt.Errorf("config: pool.session_ttl must be positive")
+	}
+	if c.Pool.MaxSessionTTL < c.Pool.SessionTTL {
+		return fmt.Errorf("config: pool.max_session_ttl must be at least pool.session_ttl")
+	}
+	if c.Pool.BatchTTL <= 0 {
+		return fmt.Errorf("config: pool.batch_ttl must be positive")
+	}
+	if c.Pool.MaxBatchTTL < c.Pool.BatchTTL {
+		return fmt.Errorf("config: pool.max_batch_ttl must be at least pool.batch_ttl")
 	}
 	if c.Pool.EntryExploreRate < 0 || c.Pool.EntryExploreRate >= 1 {
 		return fmt.Errorf("config: pool.entry_explore_rate must be in [0, 1)")

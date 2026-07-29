@@ -21,7 +21,9 @@ func TestParseEmptyAndPlainUsername(t *testing.T) {
 
 func TestParseDirectives(t *testing.T) {
 	t.Parallel()
-	pol, err := Parse("cc=JP|us;city=us-lax;sess=job-1;ttl=600;uniq=batch-7;not=1.2.3.4|5.6.7.8")
+	pol, err := Parse(
+		"cc=JP|us;city=us-lax;sess=job-1;ttl=600;uniq=batch-7;bttl=30s;not=1.2.3.4|5.6.7.8",
+	)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -41,6 +43,9 @@ func TestParseDirectives(t *testing.T) {
 	if pol.TTL != 10*time.Minute {
 		t.Errorf("TTL = %s, want 10m", pol.TTL)
 	}
+	if pol.BatchTTL != 30*time.Second {
+		t.Errorf("BatchTTL = %s, want 30s", pol.BatchTTL)
+	}
 	if pol.UniqueBatch != "batch-7" {
 		t.Errorf("UniqueBatch = %q", pol.UniqueBatch)
 	}
@@ -49,6 +54,15 @@ func TestParseDirectives(t *testing.T) {
 	}
 	if pol.IsZero() {
 		t.Error("IsZero() = true for a populated policy")
+	}
+}
+
+func TestParseBatchTTLRequiresUniqueBatch(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"bttl=30s", "bttl=0", "uniq=batch;bttl=0"} {
+		if _, err := Parse(input); err == nil {
+			t.Errorf("Parse(%q) succeeded, want an error", input)
+		}
 	}
 }
 

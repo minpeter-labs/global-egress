@@ -206,6 +206,8 @@ func TestStatusCodeFor(t *testing.T) {
 	cases := map[error]int{
 		pool.ErrNoCandidate: http.StatusConflict,
 		pool.ErrBatchFull:   http.StatusServiceUnavailable,
+		pool.ErrSessionFull: http.StatusServiceUnavailable,
+		pool.ErrPolicy:      http.StatusBadRequest,
 		pool.ErrCapacity:    http.StatusServiceUnavailable,
 		pool.ErrExhausted:   http.StatusBadGateway,
 		errors.New("other"): http.StatusBadGateway,
@@ -222,6 +224,8 @@ func TestReplyCodeFor(t *testing.T) {
 		nil:                                      repSuccess,
 		pool.ErrNoCandidate:                      repNotAllowed,
 		pool.ErrBatchFull:                        repGeneralFailure,
+		pool.ErrSessionFull:                      repGeneralFailure,
+		pool.ErrPolicy:                           repNotAllowed,
 		pool.ErrCapacity:                         repNotAllowed,
 		pool.ErrExhausted:                        repHostUnreachable,
 		context.DeadlineExceeded:                 repHostUnreachable,

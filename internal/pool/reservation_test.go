@@ -125,7 +125,7 @@ func TestAcquireReservesTunnelCapacityBeforeOpen(t *testing.T) {
 			opening := make(chan string, 2)
 			releaseOpen := make(chan struct{})
 			openErr := errors.New("test open stopped")
-			p.openTunnelForAcquire = func(
+			p.openTunnelForCapacity = func(
 				_ context.Context,
 				spec catalog.Slot,
 				_ TunnelRole,
@@ -168,6 +168,132 @@ func TestAcquireReservesTunnelCapacityBeforeOpen(t *testing.T) {
 				t.Fatalf("first Acquire error = %v, want %v", err, openErr)
 			}
 		})
+	}
+}
+
+func TestMaxActiveCountsEntryOpenings(t *testing.T) {
+	p := newRelayPool(t, Options{MaxActive: 1, DialAttempts: 1})
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	openErr := errors.New("test entry open stopped")
+	p.openTunnelForCapacity = func(
+		_ context.Context,
+		spec catalog.Slot,
+		_ TunnelRole,
+	) (*wgtunnel.Tunnel, error) {
+		entered <- spec.ID
+		<-release
+		return nil, openErr
+	}
+
+	results := make(chan error, 2)
+	for _, entry := range p.entries[:2] {
+		go func(entry *entryState) {
+			_, err := p.ensureEntryOpen(context.Background(), entry)
+			results <- err
+		}(entry)
+		if entry == p.entries[0] {
+			awaitTestEvent(t, entered)
+		}
+	}
+
+	select {
+	case entryID := <-entered:
+		close(release)
+		t.Fatalf("second entry %s opened beyond MaxActive", entryID)
+	case err := <-results:
+		if !errors.Is(err, ErrCapacity) {
+			t.Fatalf("second entry error = %v, want %v", err, ErrCapacity)
+		}
+	case <-time.After(testEventTimeout):
+		t.Fatal("timed out waiting for second entry result")
+	}
+	close(release)
+	if err := awaitTestEvent(t, results); !errors.Is(err, openErr) {
+		t.Fatalf("first entry error = %v, want %v", err, openErr)
+	}
+}
+
+func TestMaxActiveBlocksProbeDuringEntryOpen(t *testing.T) {
+	p := newRelayPool(t, Options{MaxActive: 1, DialAttempts: 1})
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	openErr := errors.New("test tunnel open stopped")
+	p.openTunnelForCapacity = func(
+		_ context.Context,
+		spec catalog.Slot,
+		_ TunnelRole,
+	) (*wgtunnel.Tunnel, error) {
+		entered <- spec.ID
+		<-release
+		return nil, openErr
+	}
+
+	entryResult := make(chan error, 1)
+	go func() {
+		_, err := p.ensureEntryOpen(context.Background(), p.entries[0])
+		entryResult <- err
+	}()
+	awaitTestEvent(t, entered)
+
+	probeState := &slotState{
+		spec: Spec{
+			ID:   "probe-wg-001",
+			Kind: KindWireGuard,
+			WG:   testEntrySlots()[1],
+		},
+	}
+	probeResult := make(chan error, 1)
+	go func() {
+		_, _, err := p.probeDialer(context.Background(), probeState)
+		probeResult <- err
+	}()
+
+	select {
+	case probeID := <-entered:
+		close(release)
+		t.Fatalf("probe %s opened beyond MaxActive", probeID)
+	case err := <-probeResult:
+		if !errors.Is(err, ErrCapacity) {
+			t.Fatalf("probe error = %v, want %v", err, ErrCapacity)
+		}
+	case <-time.After(testEventTimeout):
+		t.Fatal("timed out waiting for probe result")
+	}
+	close(release)
+	if err := awaitTestEvent(t, entryResult); !errors.Is(err, openErr) {
+		t.Fatalf("entry error = %v, want %v", err, openErr)
+	}
+}
+
+func TestProbeRollsBackCapacityAfterOpenFailure(t *testing.T) {
+	p := newTestPool(t, Options{
+		MaxActive:       1,
+		NewTunnelBudget: 1,
+		NewTunnelWindow: time.Hour,
+	})
+	openErr := errors.New("test probe open failed")
+	p.openTunnelForCapacity = func(
+		context.Context,
+		catalog.Slot,
+		TunnelRole,
+	) (*wgtunnel.Tunnel, error) {
+		return nil, openErr
+	}
+
+	_, _, err := p.probeDialer(
+		context.Background(),
+		p.slots["jp-tyo-wg-001"],
+	)
+	if !errors.Is(err, openErr) {
+		t.Fatalf("probe error = %v, want %v", err, openErr)
+	}
+
+	p.mu.Lock()
+	probeTunnels := p.probeTunnels
+	p.mu.Unlock()
+	if probeTunnels != 0 {
+		t.Fatalf("probe capacity after failure = %d, want zero", probeTunnels)
 	}
 }
 

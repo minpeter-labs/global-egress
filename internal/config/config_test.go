@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func write(t *testing.T, dir, name, content string) string {
@@ -38,6 +40,12 @@ listen:
 	if cfg.Pool.SessionTTL != 10*time.Minute {
 		t.Errorf("SessionTTL = %s, want the 10m default", cfg.Pool.SessionTTL)
 	}
+	if cfg.Pool.MaxBatchTTL != 15*time.Minute {
+		t.Errorf("MaxBatchTTL = %s, want the 15m default", cfg.Pool.MaxBatchTTL)
+	}
+	if cfg.Pool.MaxSessionTTL != 24*time.Hour {
+		t.Errorf("MaxSessionTTL = %s, want the 24h default", cfg.Pool.MaxSessionTTL)
+	}
 	if cfg.Pool.MaxActive != 25 {
 		t.Errorf("MaxActive = %d, want the default 25", cfg.Pool.MaxActive)
 	}
@@ -63,6 +71,7 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 		"pool.new_tunnels_per_window": cfg.Pool.NewTunnelsPerWindow,
 		"pool.dial_attempts":          cfg.Pool.DialAttempts,
 		"pool.max_unique_batches":     cfg.Pool.MaxUniqueBatches,
+		"pool.max_sessions":           cfg.Pool.MaxSessions,
 	}
 	for name, value := range cases {
 		if value <= 0 {
@@ -73,6 +82,7 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 		"pool.new_tunnel_window": cfg.Pool.NewTunnelWindow,
 		"pool.cooldown":          cfg.Pool.Cooldown,
 		"pool.session_ttl":       cfg.Pool.SessionTTL,
+		"pool.max_session_ttl":   cfg.Pool.MaxSessionTTL,
 	} {
 		if value <= 0 {
 			t.Errorf("%s defaults to %s", name, value)
@@ -83,6 +93,33 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 	}
 	if cfg.Mode != ModeRelaySocks {
 		t.Errorf("Mode defaults to %q, want %q", cfg.Mode, ModeRelaySocks)
+	}
+}
+
+func TestDeploymentExampleFailsClosed(t *testing.T) {
+	t.Parallel()
+	blob, err := os.ReadFile("../../deploy/config.example.yaml")
+	if err != nil {
+		t.Fatalf("read deployment example: %v", err)
+	}
+	var example struct {
+		Access struct {
+			PasswordFile  string `yaml:"password_file"`
+			RequireAuth   bool   `yaml:"require_auth"`
+			RequirePolicy bool   `yaml:"require_policy"`
+		} `yaml:"access"`
+	}
+	if err := yaml.Unmarshal(blob, &example); err != nil {
+		t.Fatalf("parse deployment example: %v", err)
+	}
+	if example.Access.PasswordFile == "" {
+		t.Error("deployment example must configure password_file")
+	}
+	if !example.Access.RequireAuth {
+		t.Error("deployment example must require proxy credentials")
+	}
+	if !example.Access.RequirePolicy {
+		t.Error("deployment example must require an explicit egress policy")
 	}
 }
 
@@ -169,12 +206,18 @@ func TestValidate(t *testing.T) {
 		"no listeners":            func(c *Config) { c.Listen.SOCKS5 = ""; c.Listen.HTTP = "" },
 		"bad client cidr":         func(c *Config) { c.Access.AllowedClients = []string{"nope"} },
 		"bad denied cidr":         func(c *Config) { c.Destinations.DeniedCIDRs = []string{"nope"} },
+		"auth without password":   func(c *Config) { c.Access.RequireAuth = true; c.Access.Password = "  " },
 		"negative max_active":     func(c *Config) { c.Pool.MaxActive = -1 },
 		"zero unique batch limit": func(c *Config) { c.Pool.MaxUniqueBatches = 0 },
-		"preopen over budget":     func(c *Config) { c.Pool.MaxActive = 2; c.Pool.Preopen = 3 },
-		"bad log level":           func(c *Config) { c.Log.Level = "loud" },
-		"bad log format":          func(c *Config) { c.Log.Format = "yaml" },
-		"invalid allowed port":    func(c *Config) { c.Destinations.AllowedPorts = []int{0} },
+		"zero session limit":      func(c *Config) { c.Pool.MaxSessions = 0 },
+		"batch ttl over maximum":  func(c *Config) { c.Pool.MaxBatchTTL = c.Pool.BatchTTL - time.Second },
+		"session ttl over maximum": func(c *Config) {
+			c.Pool.MaxSessionTTL = c.Pool.SessionTTL - time.Second
+		},
+		"preopen over budget":  func(c *Config) { c.Pool.MaxActive = 2; c.Pool.Preopen = 3 },
+		"bad log level":        func(c *Config) { c.Log.Level = "loud" },
+		"bad log format":       func(c *Config) { c.Log.Format = "yaml" },
+		"invalid allowed port": func(c *Config) { c.Destinations.AllowedPorts = []int{0} },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

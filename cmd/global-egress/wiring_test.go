@@ -29,6 +29,7 @@ func TestConfigLimitsReachThePool(t *testing.T) {
 		{"new_tunnels_per_window", cfg.Pool.NewTunnelsPerWindow, opts.NewTunnelBudget},
 		{"dial_attempts", cfg.Pool.DialAttempts, opts.DialAttempts},
 		{"max_unique_batches", cfg.Pool.MaxUniqueBatches, opts.MaxUniqueBatches},
+		{"max_sessions", cfg.Pool.MaxSessions, opts.MaxSessions},
 	}
 	for _, tc := range cases {
 		if tc.configured == 0 {
@@ -45,6 +46,12 @@ func TestConfigLimitsReachThePool(t *testing.T) {
 	}
 	if opts.Cooldown != cfg.Pool.Cooldown {
 		t.Error("cooldown does not reach the pool")
+	}
+	if opts.MaxBatchTTL != cfg.Pool.MaxBatchTTL {
+		t.Error("max_batch_ttl does not reach the pool")
+	}
+	if opts.MaxSessionTTL != cfg.Pool.MaxSessionTTL {
+		t.Error("max_session_ttl does not reach the pool")
 	}
 	var zero pool.Options
 	if opts.NewTunnelWindow == zero.NewTunnelWindow {

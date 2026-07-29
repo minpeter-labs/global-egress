@@ -55,6 +55,9 @@ type Policy struct {
 	// UniqueBatch, when set, forbids reusing a public IP already handed out
 	// within that batch.
 	UniqueBatch string
+	// BatchTTL overrides the configured unique-batch lifetime. Zero uses the
+	// server default.
+	BatchTTL time.Duration
 	// ExcludeIPs lists public IPs the client refuses.
 	ExcludeIPs []netip.Addr
 }
@@ -63,7 +66,8 @@ type Policy struct {
 // an expression, so it is not zero.
 func (p Policy) IsZero() bool {
 	return !p.AnyExit && len(p.Countries) == 0 && len(p.Cities) == 0 && p.Slot == "" &&
-		p.Session == "" && p.TTL == 0 && p.UniqueBatch == "" && len(p.ExcludeIPs) == 0
+		p.Session == "" && p.TTL == 0 && p.UniqueBatch == "" && p.BatchTTL == 0 &&
+		len(p.ExcludeIPs) == 0
 }
 
 // String renders the policy in the same syntax it is parsed from. It never
@@ -93,6 +97,9 @@ func (p Policy) String() string {
 	}
 	if p.UniqueBatch != "" {
 		parts = append(parts, "uniq="+p.UniqueBatch)
+	}
+	if p.BatchTTL > 0 {
+		parts = append(parts, "bttl="+p.BatchTTL.String())
 	}
 	for _, ip := range p.ExcludeIPs {
 		parts = append(parts, "not="+ip.String())
@@ -178,13 +185,22 @@ func Parse(username string) (Policy, error) {
 		case "sess", "session":
 			p.Session = value
 		case "ttl":
-			ttl, err := parseTTL(value)
+			ttl, err := parseTTL("ttl", value)
 			if err != nil {
 				return Policy{}, err
 			}
 			p.TTL = ttl
 		case "uniq", "unique":
 			p.UniqueBatch = value
+		case "bttl":
+			ttl, err := parseTTL("bttl", value)
+			if err != nil {
+				return Policy{}, err
+			}
+			if ttl == 0 {
+				return Policy{}, fmt.Errorf("policy: bttl must be positive")
+			}
+			p.BatchTTL = ttl
 		case "not", "exclude":
 			for _, item := range strings.Split(value, "|") {
 				addr, err := netip.ParseAddr(strings.TrimSpace(item))
@@ -241,6 +257,12 @@ func (p *Policy) validate() error {
 	if p.TTL < 0 {
 		return fmt.Errorf("policy: ttl must not be negative")
 	}
+	if p.BatchTTL < 0 {
+		return fmt.Errorf("policy: bttl must not be negative")
+	}
+	if p.BatchTTL > 0 && p.UniqueBatch == "" {
+		return fmt.Errorf("policy: bttl requires uniq")
+	}
 	// any= is about location, so it contradicts the directives that pin one, but
 	// composes fine with session stickiness and unique batches.
 	if p.AnyExit {
@@ -296,19 +318,19 @@ func appendLower(dst []string, value string) []string {
 }
 
 // parseTTL accepts bare seconds ("600") and Go durations ("10m").
-func parseTTL(value string) (time.Duration, error) {
+func parseTTL(name, value string) (time.Duration, error) {
 	if secs, err := strconv.Atoi(value); err == nil {
 		if secs < 0 {
-			return 0, fmt.Errorf("policy: ttl=%q must not be negative", value)
+			return 0, fmt.Errorf("policy: %s=%q must not be negative", name, value)
 		}
 		return time.Duration(secs) * time.Second, nil
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		return 0, fmt.Errorf("policy: ttl=%q is neither seconds nor a duration", value)
+		return 0, fmt.Errorf("policy: %s=%q is neither seconds nor a duration", name, value)
 	}
 	if d < 0 {
-		return 0, fmt.Errorf("policy: ttl=%q must not be negative", value)
+		return 0, fmt.Errorf("policy: %s=%q must not be negative", name, value)
 	}
 	return d, nil
 }

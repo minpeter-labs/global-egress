@@ -449,13 +449,15 @@ func addrFromString(value string) (net.Addr, error) {
 // statusCodeFor maps pool failures to HTTP status codes.
 func statusCodeFor(err error) int {
 	switch {
+	case errors.Is(err, pool.ErrPolicy):
+		return http.StatusBadRequest
 	case errors.Is(err, pool.ErrBatchFull):
 		// The shared active-batch map is temporarily at capacity.
 		return http.StatusServiceUnavailable
 	case errors.Is(err, pool.ErrNoCandidate):
 		// The request was understood but no egress matches the policy.
 		return http.StatusConflict
-	case errors.Is(err, pool.ErrBusy):
+	case errors.Is(err, pool.ErrBusy), errors.Is(err, pool.ErrSessionFull):
 		// Purely load; a client may retry immediately.
 		return http.StatusServiceUnavailable
 	case errors.Is(err, pool.ErrCapacity), errors.Is(err, pool.ErrTunnelBudget):

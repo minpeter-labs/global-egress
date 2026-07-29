@@ -165,7 +165,7 @@ func Fetch(ctx context.Context, url string) (*List, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mullvad: relay fetch returned %s", resp.Status)
+		return nil, fmt.Errorf("mullvad: relay fetch returned status %d", resp.StatusCode)
 	}
 	blob, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {

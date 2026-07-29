@@ -48,18 +48,16 @@ access:
   # Only these CIDRs may use the proxy and the control API.
   allowed_clients:
     - 10.0.0.0/24
-  # Optional shared password for proxy clients. The username always carries the
+  # Store the shared proxy password outside this file. The username carries the
   # selection policy (cc=, sess=, uniq=, ...), never an identity.
-  password: ""
-  # password_file: /etc/global-egress/proxy-password
-  # Reject proxy clients that present no credentials at all.
-  require_auth: false
+  password_file: /etc/global-egress/proxy-password
+  # Reject clients that drop proxy credentials.
+  require_auth: true
   # Reject requests that carry no selection directives. The policy rides in the
   # proxy username, and several clients drop the credentials when the password is
   # empty, which turns "give me a Japanese exit" into "give me any exit" with no
-  # error. Turn this on where that would be a bug; callers that genuinely want any
-  # exit can still say so with the any=1 directive.
-  require_policy: false
+  # error. Callers that genuinely want any exit must say so with any=1.
+  require_policy: true
   # Optional bearer token for the control API.
   control_token: ""
   # control_token_file: /etc/global-egress/control-token
@@ -79,8 +77,14 @@ pool:
   max_concurrent_conns: 256
   # Default lifetime of a sticky session (sess=...).
   session_ttl: 10m
+  # Maximum lifetime a client may request with ttl=.
+  max_session_ttl: 24h
+  # Maximum concurrently retained sticky-session names.
+  max_sessions: 10000
   # How long a unique-IP batch (uniq=...) remembers the IPs it used.
   batch_ttl: 15m
+  # Maximum lifetime a client may request with bttl=.
+  max_batch_ttl: 15m
   # Maximum number of concurrently active unique-IP batches. This bounds
   # attacker-controlled uniq= names retained during batch_ttl.
   max_unique_batches: 10000

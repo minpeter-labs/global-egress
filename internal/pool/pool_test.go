@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -318,6 +319,37 @@ func TestExpiredSessionIsNotReturned(t *testing.T) {
 	}
 }
 
+func TestSessionLimitIncludesPendingNames(t *testing.T) {
+	p := newTestPool(t, Options{MaxSessions: 1})
+
+	_, _, first, err := p.pick(policy.Policy{Session: "first"}, "example.com")
+	if err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	t.Cleanup(func() { p.rollbackAcquisition(first) })
+
+	if _, _, _, err := p.pick(
+		policy.Policy{Session: "second"},
+		"example.com",
+	); !errors.Is(err, ErrSessionFull) {
+		t.Fatalf("second pick error = %v, want %v", err, ErrSessionFull)
+	}
+}
+
+func TestSessionTTLOverMaximumIsRejected(t *testing.T) {
+	p := newTestPool(t, Options{
+		MaxSessions:   10,
+		MaxSessionTTL: time.Hour,
+	})
+
+	if _, _, _, err := p.pick(policy.Policy{
+		Session: "too-long",
+		TTL:     2 * time.Hour,
+	}, "example.com"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("pick error = %v, want %v", err, ErrPolicy)
+	}
+}
+
 func TestUniqueBatchExcludesUsedSlotsAndIPs(t *testing.T) {
 	p := newTestPool(t, Options{BatchTTL: time.Hour})
 	ip := netip.MustParseAddr("198.51.100.50")
@@ -347,6 +379,51 @@ func TestUniqueBatchExcludesUsedSlotsAndIPs(t *testing.T) {
 	}
 	if !freeSlot {
 		t.Error("an unused slot must remain eligible")
+	}
+}
+
+func TestUniqueBatchUsesClientTTL(t *testing.T) {
+	p := newTestPool(t, Options{
+		BatchTTL:    time.Hour,
+		MaxBatchTTL: time.Hour,
+	})
+	for index, id := range p.order {
+		setFreshPublicIP(
+			p.slots[id],
+			netip.MustParseAddr(fmt.Sprintf("203.0.113.%d", index+1)),
+		)
+	}
+
+	before := time.Now().Add(30 * time.Second)
+	_, _, reservation, err := p.pick(policy.Policy{
+		UniqueBatch: "short",
+		BatchTTL:    30 * time.Second,
+	}, "example.com")
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	t.Cleanup(func() { p.rollbackAcquisition(reservation) })
+	after := time.Now().Add(30 * time.Second)
+
+	p.mu.Lock()
+	expiresAt := p.batches["short"].expiresAt
+	p.mu.Unlock()
+	if expiresAt.Before(before) || expiresAt.After(after) {
+		t.Fatalf("batch expiry = %s, want between %s and %s", expiresAt, before, after)
+	}
+}
+
+func TestUniqueBatchTTLOverMaximumIsRejected(t *testing.T) {
+	p := newTestPool(t, Options{
+		BatchTTL:    time.Minute,
+		MaxBatchTTL: time.Hour,
+	})
+
+	if _, _, _, err := p.pick(policy.Policy{
+		UniqueBatch: "too-long",
+		BatchTTL:    2 * time.Hour,
+	}, "example.com"); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("pick error = %v, want %v", err, ErrPolicy)
 	}
 }
 

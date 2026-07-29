@@ -263,6 +263,10 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 			p.mu.Unlock()
 			return nil, err
 		}
+		if err := p.reserveCapacityLocked(); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
 		if err := p.reserveTunnelOpenLocked(time.Now()); err != nil {
 			p.mu.Unlock()
 			return nil, err
@@ -281,7 +285,7 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 			return nil, err
 		}
 		p.commitTunnelOpen()
-		tunnel, err := p.openTunnel(ctx, spec, TunnelRoleEntry)
+		tunnel, err := p.openTunnelForCapacity(ctx, spec, TunnelRoleEntry)
 
 		p.mu.Lock()
 		entry.opening = nil
