@@ -714,6 +714,21 @@ func (p *Pool) probeDialer(ctx context.Context, state *slotState) (Dialer, func(
 		dialer, _, err := p.dialerForSocksSlot(ctx, state)
 		return dialer, nil, err
 	}
+	p.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		p.mu.Unlock()
+		return nil, nil, err
+	}
+	if err := p.reserveTunnelOpenLocked(time.Now()); err != nil {
+		p.mu.Unlock()
+		return nil, nil, err
+	}
+	p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		p.rollbackTunnelOpen()
+		return nil, nil, err
+	}
+	p.commitTunnelOpen()
 	tunnel, err := p.openTunnel(ctx, state.spec.WG, TunnelRoleDirect)
 	if err != nil {
 		return nil, nil, err

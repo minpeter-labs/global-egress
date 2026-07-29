@@ -383,7 +383,7 @@ func TestUniqueBatchReservationIsAtomicAndRollsBack(t *testing.T) {
 
 	start := make(chan struct{})
 	type result struct {
-		reservation *batchReservation
+		reservation *acquisitionReservation
 		err         error
 	}
 	results := make(chan result, 2)
@@ -402,7 +402,7 @@ func TestUniqueBatchReservationIsAtomicAndRollsBack(t *testing.T) {
 	close(results)
 
 	successes := 0
-	var winningReservation *batchReservation
+	var winningReservation *acquisitionReservation
 	for result := range results {
 		if result.err == nil {
 			successes++
@@ -430,7 +430,7 @@ func TestUniqueBatchReservationIsAtomicAndRollsBack(t *testing.T) {
 		t.Fatalf("selection did not atomically reserve slot and IP: %+v", batch)
 	}
 
-	p.rollbackBatch(winningReservation)
+	p.rollbackAcquisition(winningReservation)
 	if _, _, _, err := p.pick(pol, "example.com"); err != nil {
 		t.Fatalf("pick after rollback = %v, want the released slot", err)
 	}
@@ -456,7 +456,7 @@ func TestUniqueBatchRollbackCannotReleaseRecreatedBatch(t *testing.T) {
 		t.Fatal("expected the expired batch to be replaced")
 	}
 
-	p.rollbackBatch(oldReservation)
+	p.rollbackAcquisition(oldReservation)
 	if _, _, _, err := p.pick(pol, "example.com"); !errors.Is(err, ErrNoCandidate) {
 		t.Fatalf("third pick after stale rollback = %v, want ErrNoCandidate", err)
 	}

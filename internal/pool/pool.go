@@ -175,6 +175,10 @@ type slotState struct {
 	openedAt time.Time
 	lastUsed time.Time
 	leases   int
+	// pendingLeases reserves connection capacity between selection and dialer
+	// setup. Without it, concurrent Acquire calls can all pass the limits before
+	// any of them commits a live lease.
+	pendingLeases int
 
 	publicIP    netip.Addr
 	ipCheckedAt time.Time
@@ -227,6 +231,12 @@ type batchReservation struct {
 	name   string
 	batch  *batch
 	slotID string
+}
+
+type acquisitionReservation struct {
+	batch  *batchReservation
+	state  *slotState
+	active bool
 }
 
 func redactedError(err error) string {
@@ -308,7 +318,8 @@ type Pool struct {
 	entries []*entryState
 	// opens holds the timestamps of recent tunnel openings, newest last, pruned
 	// to NewTunnelWindow.
-	opens []time.Time
+	opens              []time.Time
+	pendingTunnelOpens int
 	// closing is set by Close so background work stops starting.
 	closing bool
 
@@ -323,7 +334,11 @@ type Pool struct {
 	wg sync.WaitGroup
 
 	// leased is the number of connections currently held across all slots.
-	leased int
+	leased        int
+	pendingLeases int
+
+	ensureDialerForAcquire func(context.Context, *slotState) (Dialer, string, error)
+	openTunnelForAcquire   func(context.Context, catalog.Slot, TunnelRole) (*wgtunnel.Tunnel, error)
 
 	// counters, protected by mu
 	statAcquired          uint64
@@ -401,6 +416,8 @@ func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, er
 			samples: make(map[string]int),
 		})
 	}
+	p.ensureDialerForAcquire = p.ensureDialer
+	p.openTunnelForAcquire = p.openTunnel
 	return p, nil
 }
 
@@ -470,9 +487,9 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 			return nil, err
 		}
 
-		dialer, entryID, err := p.ensureDialer(ctx, state)
+		dialer, entryID, err := p.ensureDialerForAcquire(ctx, state)
 		if err != nil {
-			p.rollbackBatch(reservation)
+			p.rollbackAcquisition(reservation)
 			p.noteFailure(state, err)
 			lastErr = err
 			// A sticky session pointing at a broken slot must not pin the client
@@ -484,6 +501,7 @@ func (p *Pool) Acquire(ctx context.Context, pol policy.Policy, target string) (*
 		}
 
 		p.mu.Lock()
+		p.commitAcquisitionLocked(reservation)
 		state.leases++
 		p.leased++
 		state.lastUsed = time.Now()
@@ -531,14 +549,15 @@ func (s *slotState) ID() string { return s.spec.ID }
 func (p *Pool) pick(
 	pol policy.Policy,
 	target string,
-) (*slotState, bool, *batchReservation, error) {
+) (*slotState, bool, *acquisitionReservation, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	now := time.Now()
 	p.expireLocked(now)
 
-	if p.opts.MaxConcurrentConns > 0 && p.leased >= p.opts.MaxConcurrentConns {
+	if p.opts.MaxConcurrentConns > 0 &&
+		p.leased+p.pendingLeases >= p.opts.MaxConcurrentConns {
 		p.statBusy++
 		return nil, false, nil, ErrBusy
 	}
@@ -547,7 +566,7 @@ func (p *Pool) pick(
 		if sess, ok := p.sessions[pol.Session]; ok && now.Before(sess.expiresAt) {
 			if state, ok := p.slots[sess.slotID]; ok && p.eligibleLocked(state, pol, target, now) {
 				sess.expiresAt = now.Add(p.sessionTTL(pol))
-				reservation, err := p.reserveBatchLocked(pol, state, now)
+				reservation, err := p.reserveAcquisitionLocked(pol, state, now)
 				if err != nil {
 					return nil, false, nil, err
 				}
@@ -580,16 +599,13 @@ func (p *Pool) pick(
 	}
 	if len(ready) > 0 {
 		state := ready[p.rng.IntN(len(ready))]
-		reservation, err := p.reserveBatchLocked(pol, state, now)
+		reservation, err := p.reserveAcquisitionLocked(pol, state, now)
 		if err != nil {
 			return nil, false, nil, err
 		}
 		return state, false, reservation, nil
 	}
 
-	// Only WireGuard slots that need a new tunnel are left, so the tunnel budgets
-	// apply. They must not gate relay-socks slots, which open nothing: doing so
-	// would fail requests the pool could serve.
 	if !p.tunnelBudgetAvailableLocked(now) {
 		return nil, false, nil, ErrTunnelBudget
 	}
@@ -597,7 +613,7 @@ func (p *Pool) pick(
 		return nil, false, nil, err
 	}
 	state := candidates[p.rng.IntN(len(candidates))]
-	reservation, err := p.reserveBatchLocked(pol, state, now)
+	reservation, err := p.reserveAcquisitionLocked(pol, state, now)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -626,7 +642,8 @@ func (p *Pool) eligibleLocked(state *slotState, pol policy.Policy, target string
 	}
 	// Spread load: an exit already at its connection limit is not a candidate,
 	// even if it is otherwise the best match.
-	if p.opts.MaxConnsPerExit > 0 && state.leases >= p.opts.MaxConnsPerExit {
+	if p.opts.MaxConnsPerExit > 0 &&
+		state.leases+state.pendingLeases >= p.opts.MaxConnsPerExit {
 		return false
 	}
 	requiresFreshIP := pol.UniqueBatch != "" || len(pol.ExcludeIPs) > 0
@@ -675,7 +692,7 @@ func (p *Pool) reserveCapacityLocked() error {
 	// Evict the least recently used idle tunnel.
 	var victim *slotState
 	for _, state := range p.slots {
-		if !state.isOpen() || state.leases > 0 {
+		if !state.isOpen() || state.leases+state.pendingLeases > 0 {
 			continue
 		}
 		if victim == nil || state.lastUsed.Before(victim.lastUsed) {
@@ -744,12 +761,33 @@ func (p *Pool) ensureOpen(ctx context.Context, state *slotState) (*wgtunnel.Tunn
 				return nil, ctx.Err()
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+		if err := p.reserveCapacityLocked(); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
+		if err := p.reserveTunnelOpenLocked(time.Now()); err != nil {
+			p.mu.Unlock()
+			return nil, err
+		}
 		done := make(chan struct{})
 		state.opening = done
 		spec := state.spec.WG
 		p.mu.Unlock()
 
-		tunnel, err := p.openTunnel(ctx, spec, TunnelRoleDirect)
+		if err := ctx.Err(); err != nil {
+			p.rollbackTunnelOpen()
+			p.mu.Lock()
+			state.opening = nil
+			p.mu.Unlock()
+			close(done)
+			return nil, err
+		}
+		p.commitTunnelOpen()
+		tunnel, err := p.openTunnelForAcquire(ctx, spec, TunnelRoleDirect)
 
 		p.mu.Lock()
 		state.opening = nil
@@ -773,7 +811,36 @@ func (p *Pool) tunnelBudgetAvailableLocked(now time.Time) bool {
 		return true
 	}
 	p.pruneOpensLocked(now)
-	return len(p.opens) < p.opts.NewTunnelBudget
+	return len(p.opens)+p.pendingTunnelOpens < p.opts.NewTunnelBudget
+}
+
+func (p *Pool) reserveTunnelOpenLocked(now time.Time) error {
+	if !p.tunnelBudgetAvailableLocked(now) {
+		return ErrTunnelBudget
+	}
+	p.pendingTunnelOpens++
+	return nil
+}
+
+// commitTunnelOpen charges the provider-contact budget before dialing because
+// failed handshakes consume the same association quota as successful ones.
+func (p *Pool) commitTunnelOpen() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pendingTunnelOpens > 0 {
+		p.pendingTunnelOpens--
+	}
+	now := time.Now()
+	p.pruneOpensLocked(now)
+	p.opens = append(p.opens, now)
+}
+
+func (p *Pool) rollbackTunnelOpen() {
+	p.mu.Lock()
+	if p.pendingTunnelOpens > 0 {
+		p.pendingTunnelOpens--
+	}
+	p.mu.Unlock()
 }
 
 func (p *Pool) pruneOpensLocked(now time.Time) {
@@ -803,10 +870,6 @@ func (p *Pool) openTunnel(
 	spec catalog.Slot,
 	role TunnelRole,
 ) (*wgtunnel.Tunnel, error) {
-	// Count the attempt before making it: a failed handshake still contacts the
-	// relay, and that is what the provider's limit reacts to.
-	p.noteTunnelOpen(time.Now())
-
 	openCtx, cancel := context.WithTimeout(ctx, p.opts.HandshakeTimeout)
 	defer cancel()
 
@@ -897,15 +960,51 @@ func (p *Pool) reserveBatchLocked(
 	}, nil
 }
 
-// rollbackBatch releases the tentative unique-batch reservation made before a
-// dialer is opened. A successful Acquire intentionally never calls this.
-func (p *Pool) rollbackBatch(reservation *batchReservation) {
+func (p *Pool) reserveAcquisitionLocked(
+	pol policy.Policy,
+	state *slotState,
+	now time.Time,
+) (*acquisitionReservation, error) {
+	batch, err := p.reserveBatchLocked(pol, state, now)
+	if err != nil {
+		return nil, err
+	}
+	state.pendingLeases++
+	p.pendingLeases++
+	return &acquisitionReservation{
+		batch:  batch,
+		state:  state,
+		active: true,
+	}, nil
+}
+
+func (p *Pool) commitAcquisitionLocked(reservation *acquisitionReservation) {
+	if reservation == nil || !reservation.active {
+		return
+	}
+	reservation.active = false
+	if reservation.state.pendingLeases > 0 {
+		reservation.state.pendingLeases--
+	}
+	if p.pendingLeases > 0 {
+		p.pendingLeases--
+	}
+}
+
+func (p *Pool) rollbackAcquisition(reservation *acquisitionReservation) {
 	if reservation == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.commitAcquisitionLocked(reservation)
+	p.rollbackBatchLocked(reservation.batch)
+}
 
+func (p *Pool) rollbackBatchLocked(reservation *batchReservation) {
+	if reservation == nil {
+		return
+	}
 	b, ok := p.batches[reservation.name]
 	if !ok || b != reservation.batch {
 		return
@@ -1140,7 +1239,9 @@ func (p *Pool) Warmup(ctx context.Context, count int) int {
 	now := time.Now()
 	if p.opts.NewTunnelBudget > 0 {
 		p.pruneOpensLocked(now)
-		if remaining := p.opts.NewTunnelBudget - len(p.opens); remaining < count {
+		if remaining := p.opts.NewTunnelBudget -
+			len(p.opens) -
+			p.pendingTunnelOpens; remaining < count {
 			count = remaining
 		}
 	}

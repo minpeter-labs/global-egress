@@ -259,15 +259,28 @@ func (p *Pool) ensureEntryOpen(ctx context.Context, entry *entryState) (*wgtunne
 				return nil, ctx.Err()
 			}
 		}
-		if !p.tunnelBudgetAvailableLocked(time.Now()) {
+		if err := ctx.Err(); err != nil {
 			p.mu.Unlock()
-			return nil, ErrTunnelBudget
+			return nil, err
+		}
+		if err := p.reserveTunnelOpenLocked(time.Now()); err != nil {
+			p.mu.Unlock()
+			return nil, err
 		}
 		done := make(chan struct{})
 		entry.opening = done
 		spec := entry.spec
 		p.mu.Unlock()
 
+		if err := ctx.Err(); err != nil {
+			p.rollbackTunnelOpen()
+			p.mu.Lock()
+			entry.opening = nil
+			p.mu.Unlock()
+			close(done)
+			return nil, err
+		}
+		p.commitTunnelOpen()
 		tunnel, err := p.openTunnel(ctx, spec, TunnelRoleEntry)
 
 		p.mu.Lock()
