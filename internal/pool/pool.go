@@ -42,6 +42,10 @@ var (
 	ErrBusy = errors.New("pool: too many concurrent connections")
 	// ErrBatchFull means the active unique-IP batch limit has been reached.
 	ErrBatchFull = errors.New("pool: active unique-IP batch limit reached")
+	// ErrPolicy means a client policy exceeds a server-configured safety bound.
+	ErrPolicy = errors.New("pool: policy exceeds configured limits")
+	// ErrSessionFull means the sticky-session map reached its configured cap.
+	ErrSessionFull = errors.New("pool: active sticky-session limit reached")
 )
 
 // Options configures a Pool.
@@ -62,8 +66,14 @@ type Options struct {
 	MaxConcurrentConns int
 	// SessionTTL is the default lifetime of a sticky session.
 	SessionTTL time.Duration
+	// MaxSessionTTL caps a client-selected sticky-session lifetime.
+	MaxSessionTTL time.Duration
+	// MaxSessions caps retained and pending sticky-session names.
+	MaxSessions int
 	// BatchTTL is how long a unique-IP batch remembers the IPs it used.
 	BatchTTL time.Duration
+	// MaxBatchTTL caps a client-selected unique-batch lifetime.
+	MaxBatchTTL time.Duration
 	// MaxUniqueBatches caps concurrently active unique-IP batches. Zero uses the
 	// safe default.
 	MaxUniqueBatches int
@@ -116,8 +126,17 @@ func (o *Options) applyDefaults() {
 	if o.SessionTTL <= 0 {
 		o.SessionTTL = 10 * time.Minute
 	}
+	if o.MaxSessionTTL <= 0 {
+		o.MaxSessionTTL = 24 * time.Hour
+	}
+	if o.MaxSessions <= 0 {
+		o.MaxSessions = 10_000
+	}
 	if o.BatchTTL <= 0 {
 		o.BatchTTL = 15 * time.Minute
+	}
+	if o.MaxBatchTTL <= 0 {
+		o.MaxBatchTTL = o.BatchTTL
 	}
 	if o.MaxUniqueBatches <= 0 {
 		o.MaxUniqueBatches = 10_000
@@ -234,9 +253,10 @@ type batchReservation struct {
 }
 
 type acquisitionReservation struct {
-	batch  *batchReservation
-	state  *slotState
-	active bool
+	batch   *batchReservation
+	session string
+	state   *slotState
+	active  bool
 }
 
 func redactedError(err error) string {
@@ -312,7 +332,9 @@ type Pool struct {
 	slots    map[string]*slotState
 	order    []string // slot IDs in stable (sorted) order
 	sessions map[string]*session
-	batches  map[string]*batch
+	// pendingSessions counts in-flight acquisitions by new session name.
+	pendingSessions map[string]int
+	batches         map[string]*batch
 	// entries are the WireGuard tunnels that relay-socks slots ride on. Empty in
 	// pure WireGuard mode.
 	entries []*entryState
@@ -398,6 +420,7 @@ func NewWithSpecs(specs []Spec, entries []catalog.Slot, opts Options) (*Pool, er
 		rng:                   rng,
 		slots:                 make(map[string]*slotState, len(specs)),
 		sessions:              make(map[string]*session),
+		pendingSessions:       make(map[string]int),
 		batches:               make(map[string]*batch),
 		statAcquiredByCountry: make(map[string]uint64),
 	}
@@ -556,6 +579,22 @@ func (p *Pool) pick(
 
 	now := time.Now()
 	p.expireLocked(now)
+	if pol.TTL > p.opts.MaxSessionTTL {
+		return nil, false, nil, fmt.Errorf(
+			"%w: ttl %s exceeds maximum %s",
+			ErrPolicy,
+			pol.TTL,
+			p.opts.MaxSessionTTL,
+		)
+	}
+	if pol.BatchTTL > p.opts.MaxBatchTTL {
+		return nil, false, nil, fmt.Errorf(
+			"%w: bttl %s exceeds maximum %s",
+			ErrPolicy,
+			pol.BatchTTL,
+			p.opts.MaxBatchTTL,
+		)
+	}
 
 	if p.opts.MaxConcurrentConns > 0 &&
 		p.leased+p.pendingLeases >= p.opts.MaxConcurrentConns {
@@ -928,12 +967,48 @@ func (p *Pool) sessionTTL(pol policy.Policy) time.Duration {
 	return p.opts.SessionTTL
 }
 
+func (p *Pool) batchTTL(pol policy.Policy) time.Duration {
+	if pol.BatchTTL > 0 {
+		return pol.BatchTTL
+	}
+	return p.opts.BatchTTL
+}
+
 // bindSession records the sticky mapping. Caller must hold mu.
 func (p *Pool) bindSession(pol policy.Policy, slotID string) {
 	if pol.Session == "" {
 		return
 	}
 	p.sessions[pol.Session] = &session{slotID: slotID, expiresAt: time.Now().Add(p.sessionTTL(pol))}
+}
+
+func (p *Pool) reserveSessionLocked(pol policy.Policy) (string, error) {
+	if pol.Session == "" {
+		return "", nil
+	}
+	if _, exists := p.sessions[pol.Session]; exists {
+		return "", nil
+	}
+	if pending := p.pendingSessions[pol.Session]; pending > 0 {
+		p.pendingSessions[pol.Session] = pending + 1
+		return pol.Session, nil
+	}
+	if len(p.sessions)+len(p.pendingSessions) >= p.opts.MaxSessions {
+		return "", ErrSessionFull
+	}
+	p.pendingSessions[pol.Session] = 1
+	return pol.Session, nil
+}
+
+func (p *Pool) releasePendingSessionLocked(name string) {
+	if name == "" {
+		return
+	}
+	if pending := p.pendingSessions[name]; pending > 1 {
+		p.pendingSessions[name] = pending - 1
+		return
+	}
+	delete(p.pendingSessions, name)
 }
 
 // reserveBatchLocked atomically records a unique batch's selected slot and its
@@ -955,10 +1030,10 @@ func (p *Pool) reserveBatchLocked(
 		if len(p.batches) >= p.opts.MaxUniqueBatches {
 			return nil, ErrBatchFull
 		}
-		b = newBatch(now.Add(p.opts.BatchTTL))
+		b = newBatch(now.Add(p.batchTTL(pol)))
 		p.batches[pol.UniqueBatch] = b
 	}
-	b.expiresAt = now.Add(p.opts.BatchTTL)
+	b.expiresAt = now.Add(p.batchTTL(pol))
 	b.reserve(state.spec.ID, state.publicIP)
 	return &batchReservation{
 		name:   pol.UniqueBatch,
@@ -972,16 +1047,22 @@ func (p *Pool) reserveAcquisitionLocked(
 	state *slotState,
 	now time.Time,
 ) (*acquisitionReservation, error) {
+	session, err := p.reserveSessionLocked(pol)
+	if err != nil {
+		return nil, err
+	}
 	batch, err := p.reserveBatchLocked(pol, state, now)
 	if err != nil {
+		p.releasePendingSessionLocked(session)
 		return nil, err
 	}
 	state.pendingLeases++
 	p.pendingLeases++
 	return &acquisitionReservation{
-		batch:  batch,
-		state:  state,
-		active: true,
+		batch:   batch,
+		session: session,
+		state:   state,
+		active:  true,
 	}, nil
 }
 
@@ -990,6 +1071,7 @@ func (p *Pool) commitAcquisitionLocked(reservation *acquisitionReservation) {
 		return
 	}
 	reservation.active = false
+	p.releasePendingSessionLocked(reservation.session)
 	if reservation.state.pendingLeases > 0 {
 		reservation.state.pendingLeases--
 	}

@@ -158,6 +158,7 @@ curl -x http://egress.example.internal:3128 --proxy-user 'uniq=batch-7:x'       
 | `sess=name` | Sticky: reuse the same exit IP for this session |
 | `ttl=600` | Session lifetime in seconds (or `10m`) |
 | `uniq=batch` | Never reuse a public IP within this batch |
+| `bttl=30s` | Override this `uniq=` batch lifetime within the server maximum |
 | `not=1.2.3.4` | Exclude specific public IPs |
 
 Directives are separated by `;` or `,`. An empty username means "no constraints".
@@ -230,13 +231,13 @@ origin response headers.
 
 ### Distinct-exit retry chains
 
-Keep one `uniq=` value for the whole logical operation and change only `sess=`
-between attempts:
+Keep one `uniq=` value and `bttl=` lifetime for the whole logical operation.
+Use distinct `sess=` values only when the caller also needs sticky lookup:
 
 ```text
-attempt 1: any=1;sess=req-42-a1;uniq=req-42
-attempt 2: any=1;sess=req-42-a2;uniq=req-42
-attempt 3: any=1;sess=req-42-a3;uniq=req-42
+attempt 1: any=1;uniq=req-42;bttl=30s
+attempt 2: any=1;uniq=req-42;bttl=30s
+attempt 3: any=1;uniq=req-42;bttl=30s
 ```
 
 The pool atomically reserves both the selected slot and its measured public IP
@@ -257,7 +258,14 @@ same fresh-measurement requirement.
 
 Active unique batches are bounded by `pool.max_unique_batches` (default
 `10000`). Capacity exhaustion is a temporary `503 Service Unavailable`; expired
-batches are pruned before the limit is applied.
+batches are pruned before the limit is applied. Client-selected `bttl=` values
+must not exceed `pool.max_batch_ttl`; omitting `bttl=` retains the configured
+`pool.batch_ttl` behavior.
+
+Sticky names are independently bounded by `pool.max_sessions`, including names
+reserved by in-flight acquisitions. Client-selected `ttl=` values must not
+exceed `pool.max_session_ttl`. Expired sessions are pruned before either limit
+is applied.
 
 For HTTPS, the `X-Egress-*` values are on the successful `CONNECT` response,
 not the encrypted origin response. A custom proxy transport must capture those

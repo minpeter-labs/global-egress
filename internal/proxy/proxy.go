@@ -197,10 +197,12 @@ func replyCodeFor(err error) byte {
 	switch {
 	case err == nil:
 		return repSuccess
+	case errors.Is(err, pool.ErrPolicy):
+		return repNotAllowed
 	case errors.Is(err, pool.ErrNoCandidate), errors.Is(err, pool.ErrCapacity),
 		errors.Is(err, pool.ErrTunnelBudget), errors.Is(err, pool.ErrBusy):
 		return repNotAllowed
-	case errors.Is(err, pool.ErrBatchFull):
+	case errors.Is(err, pool.ErrBatchFull), errors.Is(err, pool.ErrSessionFull):
 		return repGeneralFailure
 	case errors.Is(err, pool.ErrExhausted):
 		return repHostUnreachable

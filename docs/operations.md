@@ -86,6 +86,12 @@ region fails disproportionately: one sweep lost 77 of 532 exits, concentrated in
 Europe (de 13/21, nl 10/17, ch 8/11), and 69 of them succeeded on a retry at
 concurrency 4. Those were contention, not dead exits.
 
+Request-scoped retry chains should send a bounded `bttl=` with `uniq=`. Size
+`pool.max_unique_batches` for the expected logical request rate multiplied by
+that lifetime and operational headroom. Monitor sticky-session cardinality
+separately; `pool.max_sessions` and `pool.max_session_ttl` bound retained client
+state even when connection concurrency stays low.
+
 **Stop the service first if you are writing to its state file.** The service saves
 its in-memory inventory on shutdown, so a file written underneath a running instance
 is overwritten when it stops:
