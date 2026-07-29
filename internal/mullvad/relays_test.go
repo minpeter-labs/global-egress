@@ -1,7 +1,10 @@
 package mullvad
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -184,6 +187,58 @@ func TestFetchErrorsDoNotExposeConfiguredURL(t *testing.T) {
 		_, err := Fetch(context.Background(), configuredURL)
 		assertPrivate(t, configuredURL, err)
 	})
+}
+
+func TestFetchRejectsReflectedReasonPhrase(t *testing.T) {
+	const secret = "relay-secret"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	configuredURL := fmt.Sprintf(
+		"http://%s/relays?token=%s",
+		listener.Addr(),
+		secret,
+	)
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		defer conn.Close()
+		if _, readErr := http.ReadRequest(bufio.NewReader(conn)); readErr != nil {
+			serverDone <- readErr
+			return
+		}
+		_, writeErr := fmt.Fprintf(
+			conn,
+			"HTTP/1.1 502 %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+			configuredURL,
+		)
+		serverDone <- writeErr
+	}()
+
+	_, fetchErr := Fetch(context.Background(), configuredURL)
+	if fetchErr == nil {
+		t.Fatal("expected fetch error")
+	}
+	if message := fetchErr.Error(); strings.Contains(message, configuredURL) ||
+		strings.Contains(message, secret) {
+		t.Fatalf("error exposed reflected reason phrase: %q", message)
+	}
+
+	select {
+	case serverErr := <-serverDone:
+		if serverErr != nil {
+			t.Fatalf("raw HTTP server: %v", serverErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for raw HTTP server")
+	}
 }
 
 func TestLoadOrFetchUsesFreshCache(t *testing.T) {
