@@ -20,22 +20,24 @@ func TestNoKeyShapedLiteralsInSource(t *testing.T) {
 
 	roots := []string{".", filepath.Join("..", "..", "cmd", "global-egress")}
 	for _, root := range roots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			t.Fatalf("read %s: %v", root, err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-				continue
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
-			path := filepath.Join(root, entry.Name())
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+				return nil
+			}
 			blob, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
+				return err
 			}
 			if match := keyShaped.Find(blob); match != nil {
 				t.Errorf("%s carries a key-shaped literal %s; build it at run time instead", path, match)
 			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
 		}
 	}
 

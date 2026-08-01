@@ -145,7 +145,12 @@ func TestLoadOrFetchPrefersFreshCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	list, fetched, err := LoadOrFetch(context.Background(), server.URL, cache, time.Hour)
+	list, fetched, err := LoadOrFetch(context.Background(), LoadOptions{
+		URL:        server.URL,
+		CachePath:  cache,
+		MaxAge:     time.Hour,
+		AllowStale: true,
+	})
 	if err != nil {
 		t.Fatalf("LoadOrFetch: %v", err)
 	}

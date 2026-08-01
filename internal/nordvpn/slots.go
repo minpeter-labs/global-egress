@@ -49,9 +49,18 @@ func (l *List) Slots(privateKey string) ([]catalog.Slot, error) {
 	}
 
 	slots := make([]catalog.Slot, 0, len(usable))
+	seen := make(map[string]struct{}, len(usable))
 	for _, server := range usable {
+		id := server.SlotID()
+		if id == "" {
+			return nil, fmt.Errorf("nordvpn: usable server has an empty slot ID")
+		}
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf("nordvpn: server list contains duplicate slot ID %q", id)
+		}
+		seen[id] = struct{}{}
 		slots = append(slots, catalog.Slot{
-			ID:            server.SlotID(),
+			ID:            id,
 			Country:       server.Country,
 			City:          server.City(),
 			PrivateKey:    privateKey,
@@ -65,14 +74,4 @@ func (l *List) Slots(privateKey string) ([]catalog.Slot, error) {
 		})
 	}
 	return slots, nil
-}
-
-// Bundle wraps the slots in the same shape the catalog loader produces, so the
-// rest of the program cannot tell where a bundle came from.
-func (l *List) Bundle(privateKey string) (*catalog.Bundle, error) {
-	slots, err := l.Slots(privateKey)
-	if err != nil {
-		return nil, err
-	}
-	return &catalog.Bundle{Slots: slots, DistinctKeys: 1}, nil
 }

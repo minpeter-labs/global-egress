@@ -70,13 +70,21 @@ global-egress nordvpn
 
 # Render a catalog. The key file holds the account's NordLynx private key, mode 0600.
 global-egress nordvpn -key /etc/global-egress/nordlynx.key \
-  -dir /var/lib/global-egress/wireguard -country jp -limit 40
+  -dir /var/lib/global-egress/nordvpn-wireguard -country jp -limit 40
 ```
 
 Dedicated-IP servers are dropped: they refuse an ordinary subscription, so offering
 them would fill the pool with slots that can never come up. Their WireGuard
 listeners are also less reliable than Mullvad's relays, so probe before serving and
 leave `pool.failure_backoff` room to do its job.
+
+Use a dedicated directory for each generated provider catalog. The NordVPN command
+marks and owns its output directory, refuses to adopt a non-empty unmarked
+directory, and refuses to replace a marked directory containing files outside its
+manifest. A refresh renders the complete replacement beside the live directory and
+then swaps the snapshot with rollback, so another provider's files are never
+deleted and a failed refresh leaves the previous catalog intact. Point
+`catalog.path` at `/var/lib/global-egress/nordvpn-wireguard` when serving it.
 
 The Mullvad-specific parts are confined to one package, `internal/mullvad`: the
 relay list endpoint, its JSON schema, and the fact that each relay answers SOCKS5

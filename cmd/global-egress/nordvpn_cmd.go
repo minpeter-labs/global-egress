@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/minpeter/global-egress/internal/catalog"
 	"github.com/minpeter/global-egress/internal/nordvpn"
 )
 
@@ -57,11 +55,17 @@ func runNordVPN(ctx context.Context, args []string) error {
 		return err
 	}
 
-	maxAge := 24 * time.Hour
-	if *refresh {
-		maxAge = 0
+	loadOptions := nordvpn.LoadOptions{
+		URL:        *url,
+		CachePath:  *cache,
+		MaxAge:     24 * time.Hour,
+		AllowStale: true,
 	}
-	list, fetched, err := nordvpn.LoadOrFetch(ctx, *url, *cache, maxAge)
+	if *refresh {
+		loadOptions.MaxAge = 0
+		loadOptions.AllowStale = false
+	}
+	list, fetched, err := nordvpn.LoadOrFetch(ctx, loadOptions)
 	if err != nil {
 		return err
 	}
@@ -112,122 +116,6 @@ func runNordVPN(ctx context.Context, args []string) error {
 	fmt.Printf("wrote %d configuration files into %s\n", written, *dir)
 	fmt.Printf("\nThese files contain a private key. Keep %s at mode 0700.\n", *dir)
 	return nil
-}
-
-// writeCatalog renders slots as wg-quick configuration files, the same shape the
-// catalog loader already reads.
-//
-// The catalog is replaced rather than merged: a narrower -country or -limit has to
-// shrink it, or inspect, probe and serve would keep serving servers the operator
-// just deselected. Files are written through a 0600 temporary file and renamed, so
-// a rerun cannot leave a key-bearing file at looser permissions than it needs.
-func writeCatalog(dir string, slots []catalog.Slot) (int, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return 0, fmt.Errorf("nordvpn: create catalog dir: %w", err)
-	}
-	// MkdirAll leaves an existing directory's mode alone, and this one holds
-	// private keys.
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return 0, fmt.Errorf("nordvpn: secure catalog dir failed (%T)", err)
-	}
-
-	keep := make(map[string]struct{}, len(slots))
-	written := 0
-	for _, slot := range slots {
-		name, err := catalogFileName(slot)
-		if err != nil {
-			return written, err
-		}
-		if err := writePrivateFile(filepath.Join(dir, name), renderConf(slot)); err != nil {
-			return written, err
-		}
-		keep[name] = struct{}{}
-		written++
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return written, fmt.Errorf("nordvpn: read catalog dir failed (%T)", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".conf") {
-			continue
-		}
-		if _, ok := keep[entry.Name()]; ok {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
-			return written, fmt.Errorf("nordvpn: remove obsolete catalog entry failed (%T)", err)
-		}
-	}
-	return written, nil
-}
-
-// writePrivateFile writes through a 0600 temporary file and renames, so readers
-// never see a half-written config and an existing loose mode cannot survive.
-func writePrivateFile(path, content string) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
-		return fmt.Errorf("nordvpn: write catalog entry failed (%T)", err)
-	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		return fmt.Errorf("nordvpn: secure catalog entry failed (%T)", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("nordvpn: replace catalog entry failed (%T)", err)
-	}
-	return nil
-}
-
-// catalogFileName names a slot so the catalog parser can recover its geography.
-//
-// That parser reads the country and city back out of the file name - Mullvad
-// bundles arrive as "us-lax-wg-001.conf" - by taking everything up to the second
-// hyphen, so a multi-word city like "us-saint-louis" would come back as
-// "us-saint". The city is written with its inner hyphens folded to underscores,
-// which the parser accepts as part of one city component and which reverses
-// cleanly. A name that would escape the catalog directory is refused rather than
-// sanitised, because the only way to get one is a compromised server list.
-func catalogFileName(slot catalog.Slot) (string, error) {
-	base := slot.ID
-	if slot.Country != "" && slot.City != "" {
-		city := strings.TrimPrefix(slot.City, slot.Country+"-")
-		base = fmt.Sprintf("%s-%s-%s", slot.Country, strings.ReplaceAll(city, "-", "_"), slot.ID)
-	}
-	name := base + ".conf"
-	if name != filepath.Base(name) || strings.Contains(base, "..") || strings.ContainsRune(base, filepath.Separator) {
-		return "", fmt.Errorf("nordvpn: refusing suspicious catalog entry name")
-	}
-	return name, nil
-}
-
-// renderConf writes one slot in wg-quick syntax.
-func renderConf(slot catalog.Slot) string {
-	addresses := make([]string, 0, len(slot.Addresses))
-	for _, addr := range slot.Addresses {
-		addresses = append(addresses, addr.String())
-	}
-	resolvers := make([]string, 0, len(slot.DNS))
-	for _, addr := range slot.DNS {
-		resolvers = append(resolvers, addr.String())
-	}
-	allowed := make([]string, 0, len(slot.AllowedIPs))
-	for _, prefix := range slot.AllowedIPs {
-		allowed = append(allowed, prefix.String())
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# Server: %s\n", slot.Source)
-	sb.WriteString("[Interface]\n")
-	fmt.Fprintf(&sb, "PrivateKey = %s\n", slot.PrivateKey)
-	fmt.Fprintf(&sb, "Address = %s\n", strings.Join(addresses, ", "))
-	fmt.Fprintf(&sb, "DNS = %s\n", strings.Join(resolvers, ", "))
-	fmt.Fprintf(&sb, "MTU = %d\n\n", slot.MTU)
-	sb.WriteString("[Peer]\n")
-	fmt.Fprintf(&sb, "PublicKey = %s\n", slot.PeerPublicKey)
-	fmt.Fprintf(&sb, "AllowedIPs = %s\n", strings.Join(allowed, ", "))
-	fmt.Fprintf(&sb, "Endpoint = %s\n", slot.Endpoint)
-	return sb.String()
 }
 
 func printServerSummary(list *nordvpn.List, servers []nordvpn.Server, fetched bool) {

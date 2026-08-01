@@ -21,6 +21,9 @@ func TestReadPrivateKeyRejectsLoosePermissions(t *testing.T) {
 	if err := os.WriteFile(path, []byte(key+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := readPrivateKeyFile(path); err == nil {
 		t.Fatal("readPrivateKeyFile accepted a 0644 key file, want a refusal")
@@ -105,10 +108,10 @@ func testKey(seed byte) string {
 func TestWriteCatalogReplacesObsoleteFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	stale := filepath.Join(dir, "kr-seoul-kr999.conf")
-	if err := os.WriteFile(stale, []byte("stale"), 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := writeCatalog(dir, []catalog.Slot{newTestSlot("kr999", "kr", "kr-seoul")}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
 	}
+	stale := filepath.Join(dir, "kr-seoul-kr999.conf")
 
 	slots := []catalog.Slot{newTestSlot("kr101", "kr", "kr-seoul")}
 	if _, err := writeCatalog(dir, slots); err != nil {
@@ -122,15 +125,19 @@ func TestWriteCatalogReplacesObsoleteFiles(t *testing.T) {
 func TestWriteCatalogTightensLoosePermissions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+	slot := newTestSlot("kr101", "kr", "kr-seoul")
+	if _, err := writeCatalog(dir, []catalog.Slot{slot}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	loose := filepath.Join(dir, "kr-seoul-kr101.conf")
-	if err := os.WriteFile(loose, []byte("old"), 0o644); err != nil {
+	if err := os.Chmod(loose, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := writeCatalog(dir, []catalog.Slot{newTestSlot("kr101", "kr", "kr-seoul")}); err != nil {
+	if _, err := writeCatalog(dir, []catalog.Slot{slot}); err != nil {
 		t.Fatalf("writeCatalog: %v", err)
 	}
 	dirInfo, err := os.Stat(dir)

@@ -18,23 +18,12 @@
 package nordvpn
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
-
-// DefaultURL lists every server that offers WireGuard. The filter is part of the
-// URL because the unfiltered list is several times larger and the extra entries
-// are all unusable here.
-const DefaultURL = "https://api.nordvpn.com/v1/servers" +
-	"?limit=9000&filters[servers_technologies][identifier]=wireguard_udp"
 
 // DefaultPort is the UDP port NordLynx peers listen on.
 const DefaultPort = 51820
@@ -81,32 +70,46 @@ type Server struct {
 // serverJSON mirrors the provider's nesting. Keeping it separate from Server is
 // what lets the exported type stay flat.
 type serverJSON struct {
-	Hostname  string `json:"hostname"`
-	Station   string `json:"station"`
-	Status    string `json:"status"`
-	Load      int    `json:"load"`
-	Locations []struct {
-		Country struct {
-			Code string `json:"code"`
-			City struct {
-				DNSName string `json:"dns_name"`
-				Name    string `json:"name"`
-			} `json:"city"`
-		} `json:"country"`
-	} `json:"locations"`
-	Groups []struct {
-		Title string `json:"title"`
-	} `json:"groups"`
-	Technologies []struct {
-		Identifier string `json:"identifier"`
-		Pivot      struct {
-			Status string `json:"status"`
-		} `json:"pivot"`
-		Metadata []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"metadata"`
-	} `json:"technologies"`
+	Hostname     string                 `json:"hostname"`
+	Station      string                 `json:"station"`
+	Status       string                 `json:"status"`
+	Load         int                    `json:"load"`
+	Locations    []serverLocationJSON   `json:"locations"`
+	Groups       []serverGroupJSON      `json:"groups"`
+	Technologies []serverTechnologyJSON `json:"technologies"`
+}
+
+type serverLocationJSON struct {
+	Country serverCountryJSON `json:"country"`
+}
+
+type serverCountryJSON struct {
+	Code string         `json:"code"`
+	City serverCityJSON `json:"city"`
+}
+
+type serverCityJSON struct {
+	DNSName string `json:"dns_name"`
+	Name    string `json:"name"`
+}
+
+type serverGroupJSON struct {
+	Title string `json:"title"`
+}
+
+type serverTechnologyJSON struct {
+	Identifier string               `json:"identifier"`
+	Pivot      serverPivotJSON      `json:"pivot"`
+	Metadata   []serverMetadataJSON `json:"metadata"`
+}
+
+type serverPivotJSON struct {
+	Status string `json:"status"`
+}
+
+type serverMetadataJSON struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // UnmarshalJSON flattens the provider's nested shape: the public key lives in
@@ -117,6 +120,7 @@ func (s *Server) UnmarshalJSON(blob []byte) error {
 		return err
 	}
 
+	*s = Server{}
 	s.Hostname = raw.Hostname
 	s.Station = raw.Station
 	s.Status = raw.Status
@@ -163,38 +167,19 @@ func (s Server) MarshalJSON() ([]byte, error) {
 	raw.Station = s.Station
 	raw.Status = s.Status
 	raw.Load = s.Load
-	raw.Locations = make([]struct {
-		Country struct {
-			Code string `json:"code"`
-			City struct {
-				DNSName string `json:"dns_name"`
-				Name    string `json:"name"`
-			} `json:"city"`
-		} `json:"country"`
-	}, 1)
+	raw.Locations = make([]serverLocationJSON, 1)
 	raw.Locations[0].Country.Code = s.Country
 	raw.Locations[0].Country.City.DNSName = s.CityName
 	for _, group := range s.groups {
-		raw.Groups = append(raw.Groups, struct {
-			Title string `json:"title"`
-		}{Title: group})
+		raw.Groups = append(raw.Groups, serverGroupJSON{Title: group})
 	}
 	if s.PublicKey != "" {
-		tech := struct {
-			Identifier string `json:"identifier"`
-			Pivot      struct {
-				Status string `json:"status"`
-			} `json:"pivot"`
-			Metadata []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"metadata"`
-		}{Identifier: wireGuardTechnology}
+		tech := serverTechnologyJSON{Identifier: wireGuardTechnology}
 		tech.Pivot.Status = "online"
-		tech.Metadata = append(tech.Metadata, struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		}{Name: publicKeyMetadata, Value: s.PublicKey})
+		tech.Metadata = append(tech.Metadata, serverMetadataJSON{
+			Name:  publicKeyMetadata,
+			Value: s.PublicKey,
+		})
 		raw.Technologies = append(raw.Technologies, tech)
 	}
 	return json.Marshal(raw)
@@ -297,114 +282,4 @@ func sortedKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// Fetch downloads the server list. url may be empty to use DefaultURL.
-//
-// Errors here name neither the URL nor the response body. A NordVPN deployment
-// authenticates with an account token, and an operator who puts one in the URL
-// must not have it copied into a log line by an error path.
-func Fetch(ctx context.Context, url string) (*List, error) {
-	if url == "" {
-		url = DefaultURL
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("nordvpn: create server request failed (%T)", err)
-	}
-	req.Header.Set("User-Agent", "global-egress/serverlist")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("nordvpn: server fetch failed (%T)", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("nordvpn: server fetch returned status %d", resp.StatusCode)
-	}
-	blob, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, fmt.Errorf("nordvpn: server response read failed (%T)", err)
-	}
-	return parse(blob)
-}
-
-func parse(blob []byte) (*List, error) {
-	var servers []Server
-	if err := json.Unmarshal(blob, &servers); err != nil {
-		// The body may carry an account identifier or a token echoed back, so the
-		// decoder error is reduced to its type.
-		return nil, fmt.Errorf("nordvpn: parse server list failed (%T)", err)
-	}
-	if len(servers) == 0 {
-		return nil, fmt.Errorf("nordvpn: server list is empty")
-	}
-	return &List{Servers: servers, FetchedAt: time.Now()}, nil
-}
-
-// Save writes the list to path so a restart does not need the network. The file
-// is written 0600: it is not secret in itself, but it lives beside catalog
-// material that is.
-func (l *List) Save(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("nordvpn: create cache dir: %w", err)
-	}
-	blob, err := json.MarshalIndent(l.Servers, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
-		return fmt.Errorf("nordvpn: write cache: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("nordvpn: replace cache: %w", err)
-	}
-	return nil
-}
-
-// LoadFile reads a previously saved list.
-func LoadFile(path string) (*List, error) {
-	blob, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("nordvpn: read cache failed (%T)", err)
-	}
-	list, err := parse(blob)
-	if err != nil {
-		return nil, err
-	}
-	if info, statErr := os.Stat(path); statErr == nil {
-		list.FetchedAt = info.ModTime()
-	}
-	return list, nil
-}
-
-// LoadOrFetch prefers a fresh cache file, falls back to the network, and falls
-// back again to a stale cache when the network is unavailable. The returned bool
-// reports whether the network was used.
-func LoadOrFetch(ctx context.Context, url, cachePath string, maxAge time.Duration) (*List, bool, error) {
-	if cachePath != "" && maxAge > 0 {
-		if list, err := LoadFile(cachePath); err == nil {
-			if time.Since(list.FetchedAt) < maxAge {
-				return list, false, nil
-			}
-		}
-	}
-
-	list, fetchErr := Fetch(ctx, url)
-	if fetchErr == nil {
-		if cachePath != "" {
-			// A cache write failure must not stop the service from starting.
-			_ = list.Save(cachePath)
-		}
-		return list, true, nil
-	}
-
-	if cachePath != "" {
-		if list, err := LoadFile(cachePath); err == nil {
-			return list, false, nil
-		}
-	}
-	return nil, false, fetchErr
 }

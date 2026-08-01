@@ -75,7 +75,7 @@ func TestSlotErrorsNeverCarryThePrivateKey(t *testing.T) {
 	}
 
 	broken := &List{Servers: []Server{{
-		Hostname:  "kr100.nordvpn.com",
+		Hostname:  "",
 		Station:   "not an address",
 		Status:    "online",
 		PublicKey: "AAAA",
@@ -83,8 +83,32 @@ func TestSlotErrorsNeverCarryThePrivateKey(t *testing.T) {
 		CityName:  "seoul",
 		groups:    []string{groupStandard},
 	}}}
-	if _, err := broken.Slots(testPrivateKey); err != nil && strings.Contains(err.Error(), testPrivateKey) {
+	if _, err := broken.Slots(testPrivateKey); err == nil {
+		t.Fatal("Slots accepted a usable server with an empty slot ID")
+	} else if strings.Contains(err.Error(), testPrivateKey) {
 		t.Errorf("error leaked the private key: %q", err)
+	}
+}
+
+func TestSlots_reject_duplicate_slot_ids(t *testing.T) {
+	// Given
+	server := Server{
+		Hostname:  "kr100.nordvpn.com",
+		Station:   "203.0.113.10",
+		Status:    "online",
+		PublicKey: "AAAA",
+		Country:   "kr",
+		CityName:  "seoul",
+		groups:    []string{groupStandard},
+	}
+	list := &List{Servers: []Server{server, server}}
+
+	// When
+	_, err := list.Slots(testKey(0x11))
+
+	// Then
+	if err == nil {
+		t.Fatal("Slots accepted duplicate slot IDs")
 	}
 }
 
