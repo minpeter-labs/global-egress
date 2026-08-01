@@ -123,6 +123,70 @@ cp deploy/config.example.yaml /etc/global-egress/config.yaml
 global-egress serve -config /etc/global-egress/config.yaml
 ```
 
+## OpenCode Zen public free-model gateway
+
+`global-egress zen-public` exposes only OpenCode Zen's anonymous public models
+through the existing HTTP egress proxy. It removes caller `Authorization` and
+`Proxy-Authorization` headers before contacting Zen, normalises the user agent to
+avoid client-specific Cloudflare blocks, and retries `403`, `429`, transport
+failures and retryable `5xx` responses through one distinct-IP batch.
+
+The allowed model IDs are:
+
+```text
+big-pickle
+deepseek-v4-flash-free
+laguna-s-2.1-free
+ling-3.0-flash-free
+mimo-v2.5-free
+nemotron-3-ultra-free
+north-mini-code-free
+```
+
+Run the gateway beside `global-egress serve`; the password authenticates only to
+the local forward proxy and is never sent to Zen:
+
+```sh
+global-egress zen-public \
+  -listen 127.0.0.1:8090 \
+  -forward-proxy http://127.0.0.1:3128 \
+  -proxy-password-file /etc/global-egress/proxy-password \
+  -attempts 8
+```
+
+`deploy/global-egress-zen-public.service` provides the hardened systemd unit.
+Copy `deploy/zen-public.env.example` to
+`/etc/global-egress/zen-public.env` when the listen address or attempt count must
+change. Keep the listener on loopback or a private tailnet address; it deliberately
+has no end-user authentication of its own.
+
+OpenCode can use it as an OpenAI-compatible provider without an API key:
+
+```json
+{
+  "provider": {
+    "zen-public": {
+      "name": "OpenCode Zen Public (Rotating)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:8090/v1"
+      },
+      "models": {
+        "deepseek-v4-flash-free": {
+          "name": "DeepSeek V4 Flash Free",
+          "reasoning": true,
+          "tool_call": true
+        }
+      }
+    }
+  }
+}
+```
+
+Successful and final retryable responses include `X-Zen-Egress-Attempts`, making
+an automatic exit change observable without exposing the selected proxy
+credentials.
+
 ## Using the proxy
 
 ```sh
