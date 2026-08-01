@@ -263,7 +263,7 @@ func newBundle(slots []Slot, source string) (*Bundle, error) {
 
 var (
 	// e.g. "us-lax-wg-001" or "gb-lon-wg-305"
-	slotNameRe = regexp.MustCompile(`^([a-z]{2})-([a-z0-9]+)-`)
+	slotNameRe = regexp.MustCompile(`^([a-z]{2})-([a-z0-9_]+)-`)
 	deviceRe   = regexp.MustCompile(`(?i)^#\s*device\s*:\s*(.+?)\s*$`)
 )
 
@@ -280,7 +280,9 @@ func ParseConf(name string, raw []byte) (Slot, error) {
 	}
 	if m := slotNameRe.FindStringSubmatch(slot.ID); m != nil {
 		slot.Country = m[1]
-		slot.City = m[1] + "-" + m[2]
+		// A provider whose city name contains a hyphen writes it with underscores,
+		// because the label itself is hyphen-separated.
+		slot.City = m[1] + "-" + strings.ReplaceAll(m[2], "_", "-")
 	}
 
 	section := ""

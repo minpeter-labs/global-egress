@@ -4,6 +4,7 @@
 // Subcommands:
 //
 //	import   copy a provider .zip into the catalog directory
+//	nordvpn  build a catalog from NordVPN's server list
 //	inspect  summarise a catalog without connecting anywhere
 //	probe    measure the real public IP of each slot and store the inventory
 //	serve    run the SOCKS5/HTTP proxies and the control API
@@ -75,6 +76,8 @@ func main() {
 		err = runInspect(os.Args[2:])
 	case "relays":
 		err = runRelays(ctx, os.Args[2:])
+	case "nordvpn":
+		err = runNordVPN(ctx, os.Args[2:])
 	case "probe":
 		err = runProbe(ctx, os.Args[2:])
 	case "serve":
@@ -105,6 +108,7 @@ usage:
   global-egress import  -zip <bundle.zip> -dir <catalog-dir>
   global-egress inspect -catalog <dir|zip>
   global-egress relays  [-cache <file>] [-country cc] [-refresh]
+  global-egress nordvpn [-key <file>] [-dir <catalog-dir>] [-country cc] [-limit N]
   global-egress probe   -catalog <dir|zip> [-limit N] [-concurrency N] [-country cc]
   global-egress serve   -config <config.yaml>
   global-egress version
