@@ -1,0 +1,47 @@
+[Unit]
+Description=OpenCode Zen public free-model rotating gateway
+Documentation=https://github.com/minpeter/global-egress
+After=network-online.target global-egress.service
+Wants=network-online.target
+Requires=global-egress.service
+
+[Service]
+Type=simple
+Environment=ZEN_PUBLIC_LISTEN=127.0.0.1:8090
+Environment=ZEN_PUBLIC_ATTEMPTS=8
+EnvironmentFile=-/etc/global-egress/zen-public.env
+ExecStart=/usr/local/bin/global-egress zen-public \
+  -listen ${ZEN_PUBLIC_LISTEN} \
+  -forward-proxy http://127.0.0.1:3128 \
+  -proxy-password-file /etc/global-egress/proxy-password \
+  -attempts ${ZEN_PUBLIC_ATTEMPTS}
+Restart=on-failure
+RestartSec=5s
+
+User=global-egress
+Group=global-egress
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

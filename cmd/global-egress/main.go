@@ -7,6 +7,7 @@
 //	inspect  summarise a catalog without connecting anywhere
 //	probe    measure the real public IP of each slot and store the inventory
 //	serve    run the SOCKS5/HTTP proxies and the control API
+//	zen-public run an anonymous Zen free-model gateway with egress retries
 //	version  print the build version
 package main
 
@@ -79,6 +80,8 @@ func main() {
 		err = runProbe(ctx, os.Args[2:])
 	case "serve":
 		err = runServe(ctx, os.Args[2:])
+	case "zen-public":
+		err = runZenPublic(ctx, os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(buildVersion())
 	case "help", "--help", "-h":
@@ -107,6 +110,7 @@ usage:
   global-egress relays  [-cache <file>] [-country cc] [-refresh]
   global-egress probe   -catalog <dir|zip> [-limit N] [-concurrency N] [-country cc]
   global-egress serve   -config <config.yaml>
+  global-egress zen-public -proxy-password-file <file> [-listen address]
   global-egress version
 
 Run any subcommand with -h for its flags.
