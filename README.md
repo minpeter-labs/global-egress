@@ -44,6 +44,48 @@ Being honest about the coupling, because the default mode is not generic:
 | Needs | a SOCKS5 proxy on every relay, reachable inside the tunnel, plus Mullvad's relay list API | nothing but the config bundle |
 | Exit addresses | one per relay (~530) | one per tunnel |
 
+**NordVPN** ships as a second provider package, `internal/nordvpn`. It feeds
+`wireguard` mode: `global-egress nordvpn` turns their server list into an ordinary
+catalog, and every other subcommand treats it like any other bundle.
+
+NordVPN does run SOCKS5 proxies, but they are not the Mullvad arrangement and do
+not give `relay-socks` mode anything to work with. They are a separate pool rather
+than one proxy per relay: the API lists 68 endpoints in three countries, one exit
+address each. All 68 accept TCP on port 1080 and complete SOCKS5 method
+negotiation, so they are running; what they then demand is RFC 1929
+username/password, where Mullvad's proxies resolve only inside a tunnel and take no
+credentials at all. `internal/socksdial` offers only the no-auth method today.
+
+They also rate-limit a source address hard enough that rotation is the thing they
+punish. Measured against the full list: a first sweep authenticated on 8 endpoints,
+a repeat from the same address got 1, then 0, and 90 seconds of idling did not
+restore it - while an endpoint that had just failed authenticated immediately from
+a different network. Sixty-eight exits in three countries, gated that way, is a
+poor trade against 6,886 servers in 149 countries, which is what this package
+builds tunnels for instead.
+
+```sh
+# What the account can actually use, without connecting anywhere.
+global-egress nordvpn
+
+# Render a catalog. The key file holds the account's NordLynx private key, mode 0600.
+global-egress nordvpn -key /etc/global-egress/nordlynx.key \
+  -dir /var/lib/global-egress/nordvpn-wireguard -country jp -limit 40
+```
+
+Dedicated-IP servers are dropped: they refuse an ordinary subscription, so offering
+them would fill the pool with slots that can never come up. Their WireGuard
+listeners are also less reliable than Mullvad's relays, so probe before serving and
+leave `pool.failure_backoff` room to do its job.
+
+Use a dedicated directory for each generated provider catalog. The NordVPN command
+marks and owns its output directory, refuses to adopt a non-empty unmarked
+directory, and refuses to replace a marked directory containing files outside its
+manifest. A refresh renders the complete replacement beside the live directory and
+then swaps the snapshot with rollback, so another provider's files are never
+deleted and a failed refresh leaves the previous catalog intact. Point
+`catalog.path` at `/var/lib/global-egress/nordvpn-wireguard` when serving it.
+
 The Mullvad-specific parts are confined to one package, `internal/mullvad`: the
 relay list endpoint, its JSON schema, and the fact that each relay answers SOCKS5
 on port 1080 from inside a tunnel. Everything else — tunnels, slot selection,

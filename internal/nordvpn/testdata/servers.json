@@ -1,0 +1,204 @@
+[
+  {
+    "id": 1009384,
+    "name": "Japan #1151",
+    "hostname": "jp1151.nordvpn.com",
+    "station": "187.15.133.167",
+    "status": "online",
+    "load": 15,
+    "locations": [
+      {
+        "country": {
+          "name": "Japan",
+          "code": "JP",
+          "city": {
+            "name": "Tokyo",
+            "dns_name": "tokyo"
+          }
+        }
+      }
+    ],
+    "groups": [
+      {
+        "title": "Standard VPN servers"
+      },
+      {
+        "title": "P2P"
+      },
+      {
+        "title": "Asia Pacific"
+      }
+    ],
+    "technologies": [
+      {
+        "identifier": "openvpn_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": []
+      },
+      {
+        "identifier": "wireguard_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": [
+          {
+            "name": "public_key",
+            "value": "Tk9SRFZQTi1URVNULVBFRVItS0VZLU5PVC1SRUFMLTA="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 1003510,
+    "name": "South Korea #100",
+    "hostname": "kr100.nordvpn.com",
+    "station": "89.147.101.114",
+    "status": "online",
+    "load": 30,
+    "locations": [
+      {
+        "country": {
+          "name": "South Korea",
+          "code": "KR",
+          "city": {
+            "name": "Seoul",
+            "dns_name": "seoul"
+          }
+        }
+      }
+    ],
+    "groups": [
+      {
+        "title": "Standard VPN servers"
+      },
+      {
+        "title": "P2P"
+      },
+      {
+        "title": "Asia Pacific"
+      }
+    ],
+    "technologies": [
+      {
+        "identifier": "openvpn_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": []
+      },
+      {
+        "identifier": "wireguard_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": [
+          {
+            "name": "public_key",
+            "value": "Tk9SRFZQTi1URVNULVBFRVItS0VZLU5PVC1SRUFMLTE="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 1000445,
+    "name": "Austria #155",
+    "hostname": "at155.nordvpn.com",
+    "station": "87.249.133.148",
+    "status": "online",
+    "load": 1,
+    "locations": [
+      {
+        "country": {
+          "name": "Austria",
+          "code": "AT",
+          "city": {
+            "name": "Vienna",
+            "dns_name": "vienna"
+          }
+        }
+      }
+    ],
+    "groups": [
+      {
+        "title": "Dedicated IP"
+      },
+      {
+        "title": "Europe"
+      }
+    ],
+    "technologies": [
+      {
+        "identifier": "openvpn_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": []
+      },
+      {
+        "identifier": "wireguard_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": [
+          {
+            "name": "public_key",
+            "value": "Tk9SRFZQTi1URVNULVBFRVItS0VZLU5PVC1SRUFMLTI="
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 1005361,
+    "name": "Canada - United States #100",
+    "hostname": "ca-us100.nordvpn.com",
+    "station": "37.120.237.155",
+    "status": "online",
+    "load": 8,
+    "locations": [
+      {
+        "country": {
+          "name": "United States",
+          "code": "US",
+          "city": {
+            "name": "New York",
+            "dns_name": "new-york"
+          }
+        }
+      }
+    ],
+    "groups": [
+      {
+        "title": "Double VPN"
+      },
+      {
+        "title": "The Americas"
+      }
+    ],
+    "technologies": [
+      {
+        "identifier": "openvpn_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": []
+      },
+      {
+        "identifier": "wireguard_udp",
+        "pivot": {
+          "status": "online"
+        },
+        "metadata": [
+          {
+            "name": "public_key",
+            "value": "Tk9SRFZQTi1URVNULVBFRVItS0VZLU5PVC1SRUFMLTM="
+          }
+        ]
+      }
+    ]
+  }
+]
