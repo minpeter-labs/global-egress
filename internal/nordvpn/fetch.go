@@ -129,9 +129,8 @@ func LoadOrFetch(ctx context.Context, options LoadOptions) (*List, bool, error) 
 	list, fetchErr := Fetch(ctx, options.URL)
 	if fetchErr == nil {
 		if options.CachePath != "" {
-			if err := list.Save(options.CachePath); err != nil {
-				return nil, false, fmt.Errorf("nordvpn: save fetched cache: %w", err)
-			}
+			// A cache write failure must not discard a successful fetch.
+			_ = list.Save(options.CachePath)
 		}
 		return list, true, nil
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/minpeter/global-egress/internal/catalog"
@@ -36,7 +37,7 @@ func TestWriteCatalog_refuses_unowned_directory(t *testing.T) {
 	}
 }
 
-func TestWriteCatalog_failure_leaves_previous_snapshot_intact(t *testing.T) {
+func TestWriteCatalog_invalid_slot_fails_before_touching_the_live_snapshot(t *testing.T) {
 	// Given
 	dir := t.TempDir()
 	original := newTestSlot("kr101", "kr", "kr-seoul")
@@ -65,5 +66,40 @@ func TestWriteCatalog_failure_leaves_previous_snapshot_intact(t *testing.T) {
 	}
 	if string(after) != string(before) {
 		t.Fatal("previous snapshot changed before the batch failed")
+	}
+}
+
+func TestReplaceCatalogSnapshot_rolls_the_previous_snapshot_back_when_the_swap_fails(t *testing.T) {
+	// Given
+	dir := filepath.Join(t.TempDir(), "nordvpn-wireguard")
+	if _, err := writeCatalog(dir, []catalog.Slot{newTestSlot("kr101", "kr", "kr-seoul")}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	path := filepath.Join(dir, "kr-seoul-kr101.conf")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingStage := filepath.Join(filepath.Dir(dir), ".nordvpn-stage-never-rendered")
+
+	// When
+	err = replaceCatalogSnapshot(dir, missingStage)
+
+	// Then
+	if err == nil {
+		t.Fatal("replaceCatalogSnapshot reported success without a staged snapshot")
+	}
+	if strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("rollback did not restore the previous snapshot: %v", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("previous snapshot was not rolled back: %v", readErr)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("rolled back snapshot changed to %q", after)
+	}
+	if _, statErr := os.Stat(missingStage + ".previous"); !os.IsNotExist(statErr) {
+		t.Fatalf("backup directory survived the rollback: %v", statErr)
 	}
 }
