@@ -535,9 +535,8 @@ npm ci && npm run tegami
 
 | Artifact | Where |
 |---|---|
-| `global-egress-linux-amd64` / `linux-arm64` / `darwin-arm64` | GitHub Release assets |
-| `SHA256SUMS` + per-file `.sha256` | same |
-| `ghcr.io/minpeter/global-egress:X.Y.Z` (also `:vX.Y.Z`, `:latest`) | GHCR |
+| `global-egress-linux-amd64` / `linux-arm64` / `darwin-arm64` (+ `.sha256`) | GitHub Release assets |
+| `ghcr.io/minpeter/global-egress:X.Y.Z` (also `:vX.Y.Z`, `:latest`) | GHCR (after binaries succeed) |
 
 `workflow_dispatch` on the release workflow only pushes an `edge` image so packaging
 can be smoke-tested without minting a version. Do not push version tags by hand.

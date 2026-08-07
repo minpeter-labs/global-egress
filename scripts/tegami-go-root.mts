@@ -1,30 +1,25 @@
 // Single-module Go provider for Tegami.
 //
 // tegami/plugins/go fails on modern toolchains: `go mod edit -json` emits
-// `"Require": null` / `"Replace": null`, and the plugin's typia schema only
-// accepts omitted or array values, so discovery returns zero packages (tegami
-// 1.3.3). This plugin keeps the same release contract without that path:
+// `"Require": null` / `"Replace": null`, and the plugin's typia schema rejects
+// that, so discovery finds nothing (tegami ≤ 1.3.3). This keeps the same
+// contract for one root module until upstream accepts null fields:
 //
-//   - package name = go.mod module path
-//   - version source = existing git tags `v*`
-//   - publish = git tag `vX.Y.Z` (via GitTagPublishTask + github/git plugins)
+//   package name = go.mod module path
+//   version      = newest git tag `v*`
+//   publish      = git tag `vX.Y.Z` via GitTagPublishTask + github()
 //
-// Written without TypeScript parameter properties so `node scripts/*.mts` works
-// under Node's strip-only type stripping.
+// No TypeScript parameter properties: Node strip-only mode rejects them.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import semver from "semver";
 import { x } from "tinyexec";
-import {
-  WorkspacePackage,
-  type PackagePublishResult,
-  type TegamiPlugin,
-} from "tegami";
+import { WorkspacePackage, type TegamiPlugin } from "tegami";
 import { GitTagPublishTask } from "tegami/plugins/git";
 
-const LOCK_KEY = "go-root:packages";
+const LOCK_KEY = "go-root:version";
 
 export class RootGoPackage extends WorkspacePackage {
   readonly manager = "go";
@@ -50,16 +45,11 @@ export class RootGoPackage extends WorkspacePackage {
 
 class RootGoPublishTask extends GitTagPublishTask<RootGoPackage> {}
 
-interface LockedPackage {
-  id: string;
-  version: string;
-}
-
-function formatTag(version: string): string {
+function withV(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-function stripV(version: string): string {
+function withoutV(version: string): string {
   return version.startsWith("v") ? version.slice(1) : version;
 }
 
@@ -80,26 +70,28 @@ async function readLatestVersion(cwd: string): Promise<string> {
   );
   if (result.exitCode !== 0) return "0.0.0";
   for (const line of result.stdout.split("\n")) {
-    const version = stripV(line.trim());
+    const version = withoutV(line.trim());
     if (semver.valid(version)) return version;
   }
   return "0.0.0";
 }
 
-/** Tegami plugin: root Go module → `vX.Y.Z` tags + GitHub Release notes. */
+/** Root Go module → `vX.Y.Z` tags + GitHub Release notes. */
 export function rootGoModule(): TegamiPlugin {
   let pkg: RootGoPackage | undefined;
 
   return {
     name: "root-go-module",
     async resolve() {
-      const name = await readModulePath(this.cwd);
-      const version = await readLatestVersion(this.cwd);
-      pkg = new RootGoPackage(this.cwd, name, version);
+      pkg = new RootGoPackage(
+        this.cwd,
+        await readModulePath(this.cwd),
+        await readLatestVersion(this.cwd),
+      );
       this.graph.add(pkg);
       if (!this.plugins.some((plugin) => plugin.name === "git")) {
         throw new Error(
-          'root-go-module requires the git plugin (included in github() from "tegami/plugins/github").',
+          'root-go-module requires git (included in github() from "tegami/plugins/github").',
         );
       }
     },
@@ -109,28 +101,19 @@ export function rootGoModule(): TegamiPlugin {
       if (bumped) pkg.setVersion(bumped);
     },
     initPublishLock({ lock, draft }) {
-      if (!pkg) return;
-      if (!draft.getPackageDraft(pkg.id)) return;
-      const entry: LockedPackage = { id: pkg.id, version: pkg.version };
-      lock.write(LOCK_KEY, entry);
+      if (!pkg || !draft.getPackageDraft(pkg.id)) return;
+      lock.write(LOCK_KEY, { version: pkg.version });
     },
     initPublishPlan({ lock, plan }) {
       if (!pkg) return;
-      const versions = new Map<string, string>();
-      let data: unknown;
-      while ((data = lock.read(LOCK_KEY))) {
-        const entry = data as LockedPackage;
-        if (typeof entry?.id === "string" && typeof entry?.version === "string") {
-          versions.set(entry.id, entry.version);
-        }
+      const packagePlan = plan.packages.get(pkg.id);
+      if (!packagePlan) return;
+      if (packagePlan.updated) {
+        const data = lock.read(LOCK_KEY) as { version?: string } | undefined;
+        if (typeof data?.version === "string") pkg.setVersion(data.version);
       }
-      for (const [id, packagePlan] of plan.packages) {
-        if (id !== pkg.id) continue;
-        const version = packagePlan.updated ? versions.get(id) : undefined;
-        if (version) pkg.setVersion(version);
-        packagePlan.git ??= {};
-        packagePlan.git.tag = formatTag(pkg.version);
-      }
+      packagePlan.git ??= {};
+      packagePlan.git.tag = withV(pkg.version);
     },
     async publishPreflight({ pkg: candidate }) {
       if (!(candidate instanceof RootGoPackage)) return;
@@ -142,10 +125,6 @@ export function rootGoModule(): TegamiPlugin {
         .getPackagesToPublish()
         .filter((p): p is RootGoPackage => p instanceof RootGoPackage)
         .map((p) => new RootGoPublishTask(p));
-    },
-    async publish({ pkg: candidate }): Promise<PackagePublishResult | undefined> {
-      if (!(candidate instanceof RootGoPackage)) return;
-      return { type: "published" };
     },
   };
 }

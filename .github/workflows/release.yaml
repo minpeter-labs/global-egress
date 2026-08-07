@@ -2,8 +2,8 @@
 #
 #   .tegami/*.md → Version Packages PR → merge → vX.Y.Z tag + Release
 #                                         ↓
-#                    binaries + SHA256SUMS uploaded to that Release
-#                    multi-arch image pushed to ghcr.io/<owner>/<repo>
+#                    binaries (+ .sha256) uploaded to that Release
+#                    multi-arch image pushed only after binaries succeed
 #
 # workflow_dispatch pushes an "edge" image only (no version / no Release).
 
@@ -25,7 +25,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # Version Packages PR, or on merge of that PR: git tag + GitHub Release body.
@@ -45,24 +44,19 @@ jobs:
           node-version: 24
           cache: npm
 
-      # go plugin may run `go mod tidy` while applying a version draft.
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - run: npm ci
 
       - name: Version & release
         run: node scripts/tegami.mts ci
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
-      # Go root module tags are vX.Y.Z (not name@version).
+      # Newest v* tag on HEAD (tegami just created it on a publish run).
       - name: Detect released tag
         id: tag
         run: |
-          tag="$(git tag --points-at HEAD 'v*' | head -n 1)"
+          tag="$(git tag --points-at HEAD --list 'v*' --sort=-v:refname | head -n 1)"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           if [ -n "$tag" ]; then
             echo "Released: $tag"
@@ -70,7 +64,8 @@ jobs:
             echo "No release tag on HEAD; skipping binary and image jobs."
           fi
 
-  # Static binaries for bare-metal / LXC installs. Attached to the Release tegami made.
+  # Static binaries for bare-metal / LXC. Each matrix leg attaches the binary and
+  # its .sha256 (no separate checksums job — that only duplicated failure modes).
   binaries:
     needs: release
     if: needs.release.outputs.tag != ''
@@ -98,7 +93,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # CGO off so the binary runs on musl (Alpine) guests.
       - name: build
         env:
           GOOS: ${{ matrix.goos }}
@@ -115,35 +109,11 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${TAG}" dist/* --clobber
+        run: gh release upload "${TAG}" dist/* --clobber
 
-  # Combined checksum file once every matrix binary is on the Release.
-  checksums:
-    needs: [release, binaries]
-    if: needs.release.outputs.tag != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      TAG: ${{ needs.release.outputs.tag }}
-    steps:
-      - name: SHA256SUMS
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p dist
-          # Download only the binary digests we just uploaded.
-          for pair in linux-amd64 linux-arm64 darwin-arm64; do
-            gh release download "${TAG}" \
-              --pattern "global-egress-${pair}.sha256" \
-              --dir dist
-          done
-          (cd dist && cat *.sha256 | sort > SHA256SUMS && sha256sum -c SHA256SUMS)
-          gh release upload "${TAG}" dist/SHA256SUMS --clobber
-
-  # Multi-arch image; version tags only when tegami just cut a release.
+  # Multi-arch image only after binaries are on the Release (one version, one set).
   image:
-    needs: release
+    needs: [release, binaries]
     if: needs.release.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -164,10 +134,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: version labels
-        id: ver
+      - name: image name (GHCR requires lowercase)
+        id: meta
         run: |
-          # TAG is vX.Y.Z from the Go plugin.
+          echo "image=${REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
@@ -177,9 +147,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:${{ env.TAG }}
+            ${{ steps.meta.outputs.image }}:latest
           build-args: |
             VERSION=${{ env.TAG }}
           cache-from: type=gha
@@ -203,13 +173,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: image name (GHCR requires lowercase)
+        id: meta
+        run: |
+          echo "image=${REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:edge
+          tags: ${{ steps.meta.outputs.image }}:edge
           build-args: |
             VERSION=edge
           cache-from: type=gha

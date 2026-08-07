@@ -22,6 +22,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 	-ldflags "-X main.version=${VERSION} -s -w" \
 	-o /out/global-egress ./cmd/global-egress
 
+# Empty state tree owned by distroless nonroot (uid 65532) so a named volume
+# seeded from the image is writable on first start.
+RUN mkdir -p /out/state && chown -R 65532:65532 /out/state
+
 # CA certs for Mullvad relay list and IP measurement; no shell, no package manager.
 FROM gcr.io/distroless/static-debian12:nonroot
 
@@ -30,14 +34,13 @@ LABEL org.opencontainers.image.title="global-egress" \
 	org.opencontainers.image.source="https://github.com/minpeter/global-egress" \
 	org.opencontainers.image.licenses="MIT"
 
+# Seed before USER so ownership sticks for anonymous/named volume first mounts.
+COPY --from=build --chown=nonroot:nonroot /out/state /var/lib/global-egress
+COPY --from=build --chown=nonroot:nonroot /out/global-egress /usr/local/bin/global-egress
+
 USER nonroot:nonroot
 
-# Paths match deploy/docker/config.example.yaml and the compose mounts.
-VOLUME ["/var/lib/global-egress", "/catalog"]
-
 EXPOSE 1080 3128 8080
-
-COPY --from=build --chown=nonroot:nonroot /out/global-egress /usr/local/bin/global-egress
 
 ENTRYPOINT ["/usr/local/bin/global-egress"]
 CMD ["serve", "-config", "/etc/global-egress/config.yaml"]

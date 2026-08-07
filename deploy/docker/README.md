@@ -38,9 +38,10 @@ curl -x http://cc=jp:changeme@127.0.0.1:3128 https://am.i.mullvad.net/ip
 | `catalog/` | `/catalog` | WireGuard key material; keep private |
 | named volume `state` | `/var/lib/global-egress` | IP inventory + relay cache |
 
-The image user is distroless `nonroot` (uid 65532). The state volume is created
-empty and owned correctly on first start; if you bind-mount a host directory for
-state, `chown 65532:65532` it first.
+The image user is distroless `nonroot` (uid 65532). The image seeds
+`/var/lib/global-egress` with that ownership so a **named** volume copied from
+the image is writable on first start. If you **bind-mount** a host directory for
+state instead, `chown 65532:65532` it first.
 
 ## Image
 
