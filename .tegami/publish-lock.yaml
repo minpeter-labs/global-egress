@@ -1,0 +1,11 @@
+core:changelogs:
+  - content: "---\npackages:\n  github.com/minpeter/global-egress:\n    type: patch\n---\n\n## Container packaging and Tegami-managed releases\n\nAdd a distroless Docker image and Compose layout for unprivileged deploys.\nDrive versions with Tegami (`.tegami` entries → Version Packages PR → `vX.Y.Z`\ntag and GitHub Release), then attach static binaries and push multi-arch images\nto GHCR as CI side artifacts.\n\nFirst public tag is `v0.0.1` (no prior tags → baseline `0.0.0`, patch bump).\n"
+    filename: 2026-08-08-docker-and-tegami-release.md
+    v: 0.0.0
+core:packages:
+  - changelogIds:
+      - 2026-08-08-docker-and-tegami-release.md
+    id: go:github.com/minpeter/global-egress
+    updated: true
+go-root:version:
+  - version: 0.0.1

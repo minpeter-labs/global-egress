@@ -1,9 +1,6 @@
----
-packages:
-  "github.com/minpeter/global-egress": patch
----
+## github.com/minpeter/global-egress@0.0.1
 
-## Container packaging and Tegami-managed releases
+### Container packaging and Tegami-managed releases
 
 Add a distroless Docker image and Compose layout for unprivileged deploys.
 Drive versions with Tegami (`.tegami` entries → Version Packages PR → `vX.Y.Z`
