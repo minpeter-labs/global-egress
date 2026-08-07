@@ -514,6 +514,50 @@ The one panel to watch over time is guest memory: userspace tunnels cost about
 Systemd hosts use [`deploy/global-egress.service`](deploy/global-egress.service);
 Alpine/OpenRC guests use [`deploy/openrc/global-egress`](deploy/openrc/global-egress)
 and [`deploy/collector/global-egress-metrics.openrc`](deploy/collector/global-egress-metrics.openrc).
+Containers use the root [`Dockerfile`](Dockerfile) and
+[`deploy/docker`](deploy/docker) (Compose + example config).
+
+### Cutting a release
+
+Push a semver tag. CI builds static binaries, creates a GitHub Release with
+checksums, and publishes a multi-arch image to GHCR:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+| Artifact | Where |
+|---|---|
+| `global-egress-linux-amd64` / `linux-arm64` / `darwin-arm64` | GitHub Release assets |
+| `SHA256SUMS` + per-file `.sha256` | same |
+| `ghcr.io/minpeter/global-egress:0.1.0` (also `:v0.1.0`, `:latest`) | GHCR |
+
+`workflow_dispatch` on the release workflow only pushes an `edge` image so packaging
+can be smoke-tested without minting a version.
+
+### Docker / Compose
+
+Userspace tunnels need no `/dev/net/tun` and no `NET_ADMIN`, so the image runs as
+an unprivileged distroless user.
+
+```sh
+cd deploy/docker
+cp config.example.yaml config.yaml
+printf 'changeme\n' > proxy-password && chmod 600 proxy-password
+mkdir -p catalog   # provider .conf files or a .zip
+docker compose up -d --build
+```
+
+Or pull a release image and skip the local build:
+
+```sh
+export GLOBAL_EGRESS_IMAGE=ghcr.io/minpeter/global-egress:latest
+docker compose -f deploy/docker/docker-compose.yml up -d
+```
+
+Ports default to host loopback only (`127.0.0.1:1080/3128/8080`). Details and a
+Kubernetes sketch are in [`deploy/docker/README.md`](deploy/docker/README.md).
 
 ### Alpine / OpenRC
 

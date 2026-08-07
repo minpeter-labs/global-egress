@@ -1,3 +1,14 @@
+# Cut a version by pushing a semver tag:
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# That creates a GitHub Release with static binaries + checksums, and pushes a
+# multi-arch container image to ghcr.io/<owner>/<repo>.
+#
+# workflow_dispatch builds an "edge" image only (no GitHub Release) so packaging
+# can be smoke-tested without minting a version.
+
 name: release
 
 on:
@@ -7,17 +18,26 @@ on:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Static binaries for guests that install the file by hand (LXC, bare metal).
   binaries:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
             goarch: amd64
           - goos: linux
+            goarch: arm64
+          - goos: darwin
             goarch: arm64
     steps:
       - uses: actions/checkout@v7
@@ -27,8 +47,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # CGO stays off so the binary runs on musl systems such as Alpine, which is
-      # the usual target for a small egress container.
+      # CGO stays off so the binary runs on musl systems such as Alpine.
       - name: build
         env:
           GOOS: ${{ matrix.goos }}
@@ -37,18 +56,112 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME}"
           name="global-egress-${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags "-X main.version=${version} -s -w" -o "${name}" ./cmd/global-egress
-          sha256sum "${name}" > "${name}.sha256"
+          go build -trimpath \
+            -ldflags "-X main.version=${version} -s -w" \
+            -o "dist/${name}" ./cmd/global-egress
+          (cd dist && sha256sum "${name}" > "${name}.sha256")
 
       - uses: actions/upload-artifact@v7
         with:
           name: global-egress-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            global-egress-*
-            !*.sha256
+          path: dist/*
+          if-no-files-found: error
 
-      - name: attach to release
-        if: startsWith(github.ref, 'refs/tags/')
+  # Multi-arch image for compose / k8s. Same static binary as the linux matrix.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Assemble one GitHub Release from the matrix artifacts. Runs only on version
+  # tags so a manual workflow_dispatch cannot clobber a published release.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [binaries, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: |
+          cd dist
+          ls -la
+          # Combined list so operators can verify the whole set in one file.
+          cat *.sha256 | sort > SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" global-egress-* --clobber
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          image="${REGISTRY}/${IMAGE_NAME}"
+          notes="$(mktemp)"
+          {
+            echo "### Container"
+            echo ""
+            echo '```'
+            echo "docker pull ${image}:${tag#v}"
+            echo "docker pull ${image}:${tag}"
+            echo '```'
+            echo ""
+            echo "Also tagged \`${image}:latest\`."
+            echo ""
+            echo "### Binaries"
+            echo ""
+            echo "Static builds (\`CGO_ENABLED=0\`) attached below, with per-file"
+            echo "\`.sha256\` digests and a combined \`SHA256SUMS\`."
+            echo ""
+            echo "Compose example: [\`deploy/docker\`](https://github.com/${{ github.repository }}/tree/${tag}/deploy/docker)."
+          } > "${notes}"
+
+          # Idempotent on re-run: create if missing, then replace assets.
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --title "${tag}" \
+              --notes-file "${notes}" \
+              --verify-tag
+          fi
+          gh release upload "${tag}" dist/* --clobber

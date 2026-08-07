@@ -9,7 +9,11 @@ LOCAL_CONFIG ?= config.local.yaml
 GOBIN := $(shell go env GOPATH)/bin
 GOFILES := $(shell find cmd internal -name '*.go')
 
-.PHONY: all build build-static install test race vet fmt fmtcheck lint vulncheck tools tidy outdated check run probe inspect relays clean
+IMAGE   ?= global-egress
+# Override for a registry path, e.g. ghcr.io/minpeter/global-egress.
+DOCKER_IMAGE ?= $(IMAGE)
+
+.PHONY: all build build-static install test race vet fmt fmtcheck lint vulncheck tools tidy outdated check run probe inspect relays clean docker docker-run
 
 all: check build
 
@@ -20,6 +24,17 @@ build:
 build-static:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
 		-ldflags "$(LDFLAGS) -s -w" -o dist/$(BINARY)-linux-amd64 $(PKG)
+
+# Local image; multi-arch publish happens in .github/workflows/release.yaml.
+docker:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		-t $(DOCKER_IMAGE):$(VERSION) \
+		-t $(DOCKER_IMAGE):latest \
+		.
+
+docker-run: docker
+	docker run --rm $(DOCKER_IMAGE):$(VERSION) version
 
 install: build
 	install -m 0755 bin/$(BINARY) /usr/local/bin/$(BINARY)

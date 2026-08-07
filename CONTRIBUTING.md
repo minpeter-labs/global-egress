@@ -32,6 +32,21 @@ CI runs these jobs in parallel:
 | `cross-build` | linux/amd64, linux/arm64, darwin/arm64 compile |
 | `vulncheck` | `govulncheck` |
 
+## Releases
+
+Versions are git tags. Pushing `vX.Y.Z` runs `.github/workflows/release.yaml`:
+
+1. static binaries (`linux/amd64`, `linux/arm64`, `darwin/arm64`) with checksums
+2. a GitHub Release holding those assets
+3. multi-arch container image on `ghcr.io/<owner>/<repo>` (`:X.Y.Z`, `:latest`)
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Do not attach provider bundles or keys to a release.
+
 ## Supported Go versions
 
 The floor is **Go 1.25.12**, and both parts of that are forced:

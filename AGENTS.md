@@ -27,7 +27,7 @@ internal/
   mullvad/             # provider: relay list + per-relay SOCKS proxy
   nordvpn/             # provider: server list -> catalog.Slot
   config/              # YAML load + validate
-deploy/                # systemd unit, OpenRC scripts, collector, Grafana dashboard
+deploy/                # systemd, OpenRC, Docker/Compose, collector, Grafana
 docs/                  # operations.md (observed behaviour), capacity.md (measurements)
 scripts/               # entry-bench.py (pick entries), verify.py (e2e smoke)
 ```
