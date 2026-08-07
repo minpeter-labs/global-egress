@@ -11,3 +11,6 @@ config.yaml
 # Build output
 /bin/
 /dist/
+
+# Tegami / Node release tooling (package.json is private, not an npm package)
+/node_modules/

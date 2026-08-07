@@ -50,12 +50,12 @@ docker build -t global-egress:local --build-arg VERSION=$(git describe --tags --
 docker run --rm global-egress:local version
 ```
 
-Push a `v*` tag (see README *Cutting a release*). That publishes multi-arch
-images to `ghcr.io/minpeter/global-egress` and attaches static binaries to the
-GitHub Release:
+Merge a Tegami **Version Packages** PR (see README *Cutting a release*). That
+creates a `vX.Y.Z` tag, attaches static binaries to the GitHub Release, and
+publishes multi-arch images:
 
 - `ghcr.io/minpeter/global-egress:latest`
-- `ghcr.io/minpeter/global-egress:X.Y.Z` (and `:vX.Y.Z`, `:X.Y`)
+- `ghcr.io/minpeter/global-egress:X.Y.Z` (and `:vX.Y.Z`)
 
 ## Sizing
 

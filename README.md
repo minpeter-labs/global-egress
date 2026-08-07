@@ -519,22 +519,28 @@ Containers use the root [`Dockerfile`](Dockerfile) and
 
 ### Cutting a release
 
-Push a semver tag. CI builds static binaries, creates a GitHub Release with
-checksums, and publishes a multi-arch image to GHCR:
+Releases are managed with [Tegami](https://tegami.fuma-nama.dev) (same flow as
+the rest of the minpeter repos):
+
+1. Merge PRs that include a `.tegami/*.md` changelog entry.
+2. CI runs `node scripts/tegami.mts ci` and opens a **Version Packages** PR.
+3. Merge that PR when you intend to publish. Tegami creates a `vX.Y.Z` git tag
+   and a GitHub Release with notes from the changelogs.
+4. Follow-up jobs attach static binaries and push a multi-arch image to GHCR.
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+# interactive changelog (optional)
+npm ci && npm run tegami
 ```
 
 | Artifact | Where |
 |---|---|
 | `global-egress-linux-amd64` / `linux-arm64` / `darwin-arm64` | GitHub Release assets |
 | `SHA256SUMS` + per-file `.sha256` | same |
-| `ghcr.io/minpeter/global-egress:0.1.0` (also `:v0.1.0`, `:latest`) | GHCR |
+| `ghcr.io/minpeter/global-egress:X.Y.Z` (also `:vX.Y.Z`, `:latest`) | GHCR |
 
 `workflow_dispatch` on the release workflow only pushes an `edge` image so packaging
-can be smoke-tested without minting a version.
+can be smoke-tested without minting a version. Do not push version tags by hand.
 
 ### Docker / Compose
 
