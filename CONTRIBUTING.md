@@ -32,6 +32,30 @@ CI runs these jobs in parallel:
 | `cross-build` | linux/amd64, linux/arm64, darwin/arm64 compile |
 | `vulncheck` | `govulncheck` |
 
+## Releases
+
+Versions are driven by [Tegami](https://tegami.fuma-nama.dev) (`scripts/tegami.mts`):
+
+1. Every user-facing change should land with a `.tegami/*.md` entry (package
+   `github.com/minpeter/global-egress`, usually `type: patch` / `minor`).
+2. On `main`, CI runs `tegami ci`. Pending entries open a **Version Packages** PR.
+3. Merging that PR publishes: git tag `vX.Y.Z`, GitHub Release notes, then CI
+   attaches static binaries and pushes the multi-arch GHCR image.
+
+```sh
+npm ci
+npm run tegami          # interactive changelog
+node scripts/tegami.mts ci   # what release CI runs
+```
+
+The Go unit is registered by `scripts/tegami-go-root.mts` rather than
+`tegami/plugins/go`: current Go toolchains emit `null` for empty `require` /
+`replace` in `go mod edit -json`, and the stock plugin rejects that schema.
+When upstream accepts null fields, switch back to `go()`.
+
+Do not push version tags by hand, and do not attach provider bundles or keys to
+a release. Merge the Version Packages PR only when you mean to ship.
+
 ## Supported Go versions
 
 The floor is **Go 1.25.12**, and both parts of that are forced:

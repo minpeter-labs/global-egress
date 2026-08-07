@@ -98,28 +98,36 @@ func TestDefaultsPopulateSafetyLimits(t *testing.T) {
 
 func TestDeploymentExampleFailsClosed(t *testing.T) {
 	t.Parallel()
-	blob, err := os.ReadFile("../../deploy/config.example.yaml")
-	if err != nil {
-		t.Fatalf("read deployment example: %v", err)
-	}
-	var example struct {
-		Access struct {
-			PasswordFile  string `yaml:"password_file"`
-			RequireAuth   bool   `yaml:"require_auth"`
-			RequirePolicy bool   `yaml:"require_policy"`
-		} `yaml:"access"`
-	}
-	if err := yaml.Unmarshal(blob, &example); err != nil {
-		t.Fatalf("parse deployment example: %v", err)
-	}
-	if example.Access.PasswordFile == "" {
-		t.Error("deployment example must configure password_file")
-	}
-	if !example.Access.RequireAuth {
-		t.Error("deployment example must require proxy credentials")
-	}
-	if !example.Access.RequirePolicy {
-		t.Error("deployment example must require an explicit egress policy")
+	for _, path := range []string{
+		"../../deploy/config.example.yaml",
+		"../../deploy/docker/config.example.yaml",
+	} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			blob, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read deployment example: %v", err)
+			}
+			var example struct {
+				Access struct {
+					PasswordFile  string `yaml:"password_file"`
+					RequireAuth   bool   `yaml:"require_auth"`
+					RequirePolicy bool   `yaml:"require_policy"`
+				} `yaml:"access"`
+			}
+			if err := yaml.Unmarshal(blob, &example); err != nil {
+				t.Fatalf("parse deployment example: %v", err)
+			}
+			if example.Access.PasswordFile == "" {
+				t.Error("deployment example must configure password_file")
+			}
+			if !example.Access.RequireAuth {
+				t.Error("deployment example must require proxy credentials")
+			}
+			if !example.Access.RequirePolicy {
+				t.Error("deployment example must require an explicit egress policy")
+			}
+		})
 	}
 }
 

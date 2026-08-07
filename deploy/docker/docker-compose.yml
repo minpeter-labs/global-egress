@@ -1,0 +1,52 @@
+# Minimal compose stack for global-egress.
+#
+# Prerequisites (in this directory, or override with env / compose overrides):
+#   config.yaml          from config.example.yaml
+#   proxy-password       single-line shared secret for proxy clients
+#   catalog/             provider .conf files, or a .zip
+#
+#   docker compose -f deploy/docker/docker-compose.yml up -d
+#
+# No NET_ADMIN, no /dev/net/tun, no privileged mode.
+
+name: global-egress
+
+services:
+  global-egress:
+    image: ${GLOBAL_EGRESS_IMAGE:-ghcr.io/minpeter/global-egress:latest}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    # Hundreds of tunnels mean hundreds of UDP sockets plus client connections.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    # Publish only on the host loopback by default. Point clients at the LAN
+    # address (or drop the 127.0.0.1 prefix) once access.allowed_clients is set.
+    ports:
+      - "127.0.0.1:1080:1080" # SOCKS5
+      - "127.0.0.1:3128:3128" # HTTP CONNECT
+      - "127.0.0.1:8080:8080" # control + /v1/metrics
+    volumes:
+      - ./config.yaml:/etc/global-egress/config.yaml:ro
+      - ./proxy-password:/etc/global-egress/proxy-password:ro
+      - ./catalog:/catalog:ro
+      - state:/var/lib/global-egress
+    # Distroless has no shell; compose healthcheck would need an external probe.
+    # Use: curl -sf -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/stats
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Optional memory headroom for ~25 open userspace tunnels (~1.6 MiB each).
+    mem_limit: 1g
+
+volumes:
+  state:
